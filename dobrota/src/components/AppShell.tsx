@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { CATEGORIES, type CategoryId } from "@/lib/categories";
+import { compressImage } from "@/lib/compressImage";
 
 type Me = {
   name: string;
@@ -16,6 +17,7 @@ type Deed = {
   category: string;
   points: number;
   createdAt: string;
+  photoUrl?: string | null;
 };
 
 type BoardEntry = {
@@ -23,6 +25,17 @@ type BoardEntry = {
   name: string;
   totalPoints: number;
   deedCount: number;
+  isYou: boolean;
+};
+
+type FeedItem = {
+  id: number;
+  title: string;
+  category: string;
+  points: number;
+  createdAt: string;
+  photoUrl: string;
+  authorName: string;
   isYou: boolean;
 };
 
@@ -53,20 +66,25 @@ export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [deeds, setDeeds] = useState<Deed[]>([]);
   const [board, setBoard] = useState<BoardEntry[]>([]);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<CategoryId>("help");
+  const [photo, setPhoto] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const loadAll = useCallback(async () => {
     setError(null);
-    const [meRes, deedsRes, boardRes] = await Promise.all([
+    const [meRes, deedsRes, boardRes, feedRes] = await Promise.all([
       fetch("/api/me", { cache: "no-store" }),
       fetch("/api/deeds", { cache: "no-store" }),
       fetch("/api/leaderboard", { cache: "no-store" }),
+      fetch("/api/feed", { cache: "no-store" }),
     ]);
 
     if (!meRes.ok) {
@@ -76,11 +94,13 @@ export function AppShell() {
     const meJson = (await meRes.json()) as Me;
     const deedsJson = (await deedsRes.json()) as { deeds: Deed[] };
     const boardJson = (await boardRes.json()) as { entries: BoardEntry[] };
+    const feedJson = (await feedRes.json()) as { items: FeedItem[] };
 
     setMe(meJson);
     setNameDraft(meJson.name);
     setDeeds(deedsJson.deeds ?? []);
     setBoard(boardJson.entries ?? []);
+    setFeed(feedJson.items ?? []);
   }, []);
 
   useEffect(() => {
@@ -101,6 +121,17 @@ export function AppShell() {
     };
   }, [loadAll]);
 
+  async function onPickPhoto(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const dataUrl = await compressImage(file);
+      setPhoto(dataUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось обработать фото");
+    }
+  }
+
   async function onAddDeed(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -110,14 +141,21 @@ export function AppShell() {
       const res = await fetch("/api/deeds", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, category }),
+        body: JSON.stringify({ title, category, photo }),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Не удалось сохранить");
       }
       setTitle("");
-      setFlash(`+${data.deed.points} баллов за доброе дело`);
+      setPhoto(null);
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (galleryInputRef.current) galleryInputRef.current.value = "";
+      setFlash(
+        photo
+          ? `+${data.deed.points} баллов · фото сохранено`
+          : `+${data.deed.points} баллов за доброе дело`,
+      );
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -163,7 +201,7 @@ export function AppShell() {
         <div className="relative z-10 mx-auto flex min-h-[calc(100svh-4rem)] max-w-5xl flex-col justify-end gap-10 pb-6 pt-16 sm:justify-center sm:pb-10">
           <div className="max-w-2xl">
             <p
-              className="reveal font-[family-name:var(--font-display)] text-5xl font-semibold tracking-tight text-[var(--ink)] sm:text-7xl md:text-8xl"
+              className="reveal text-5xl font-semibold tracking-tight text-[var(--ink)] sm:text-7xl md:text-8xl"
               style={{ fontFamily: "var(--font-display)" }}
             >
               Доброта
@@ -172,11 +210,11 @@ export function AppShell() {
               className="reveal reveal-delay-1 mt-5 max-w-xl text-2xl font-medium leading-snug text-[var(--ink)] sm:text-3xl"
               style={{ fontFamily: "var(--font-display)" }}
             >
-              Делай доброе дело — отмечай его — поднимайся в рейтинге
+              Делай доброе дело — сфотографируй — поднимайся в рейтинге
             </h1>
             <p className="reveal reveal-delay-2 mt-4 max-w-md text-base leading-relaxed text-[var(--ink-soft)] sm:text-lg">
-              Здесь каждое доброе действие превращается в баллы, а таблица
-              показывает, кто сегодня делает мир теплее.
+              Отмечай хорошие поступки, прикрепляй фото и смотри, как тепло
+              распространяется в общей ленте.
             </p>
             <div className="reveal reveal-delay-3 mt-8 flex flex-wrap items-center gap-3">
               <a
@@ -186,10 +224,10 @@ export function AppShell() {
                 Отметить доброе дело
               </a>
               <a
-                href="#board"
+                href="#feed"
                 className="inline-flex items-center justify-center rounded-full border border-[var(--line)] bg-[var(--mist)] px-6 py-3 text-sm font-semibold text-[var(--ink)] backdrop-blur-sm transition hover:bg-white/70"
               >
-                Смотреть рейтинг
+                Лента с фото
               </a>
             </div>
           </div>
@@ -232,8 +270,8 @@ export function AppShell() {
             Что хорошего ты сделал?
           </h2>
           <p className="mt-3 max-w-xl text-[var(--ink-soft)]">
-            Коротко опиши дело и выбери, насколько оно было значимым — от этого
-            зависят баллы.
+            Опиши дело, выбери категорию и при желании добавь фото с телефона
+            или камеры.
           </p>
 
           <form
@@ -254,6 +292,68 @@ export function AppShell() {
                 className="w-full resize-y rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 outline-none ring-[var(--leaf)] transition focus:ring-2"
               />
             </label>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-[var(--ink)]">
+                Фото доброго дела
+              </p>
+              <p className="mb-3 text-sm text-[var(--ink-soft)]">
+                Необязательно. На телефоне можно сразу открыть камеру.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="rounded-full border border-[var(--line)] bg-white/70 px-5 py-3 text-sm font-semibold hover:bg-white"
+                >
+                  Сфотографировать
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="rounded-full border border-[var(--line)] bg-white/70 px-5 py-3 text-sm font-semibold hover:bg-white"
+                >
+                  Из галереи
+                </button>
+                {photo ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoto(null);
+                      if (cameraInputRef.current) cameraInputRef.current.value = "";
+                      if (galleryInputRef.current)
+                        galleryInputRef.current.value = "";
+                    }}
+                    className="rounded-full px-5 py-3 text-sm font-semibold text-[var(--ink-soft)] underline-offset-2 hover:underline"
+                  >
+                    Убрать фото
+                  </button>
+                ) : null}
+              </div>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                onChange={(e) => onPickPhoto(e.target.files?.[0])}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                onChange={(e) => onPickPhoto(e.target.files?.[0])}
+              />
+              {photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={photo}
+                  alt="Превью фото доброго дела"
+                  className="mt-4 max-h-72 w-full rounded-2xl object-cover"
+                />
+              ) : null}
+            </div>
 
             <fieldset>
               <legend className="mb-3 text-sm font-medium text-[var(--ink)]">
@@ -315,6 +415,52 @@ export function AppShell() {
               ) : null}
             </div>
           </form>
+        </section>
+
+        <section id="feed" className="scroll-mt-10">
+          <p
+            className="text-sm font-semibold uppercase tracking-[0.18em] text-[var(--leaf)]"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Лента
+          </p>
+          <h2
+            className="mt-2 text-3xl font-semibold text-[var(--ink)] sm:text-4xl"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Добрые дела в кадре
+          </h2>
+          <p className="mt-3 max-w-xl text-[var(--ink-soft)]">
+            Последние записи с фото от всех участников.
+          </p>
+
+          {feed.length === 0 ? (
+            <p className="mt-8 border-y border-[var(--line)] py-8 text-[var(--ink-soft)]">
+              Пока нет фото — добавь первое выше.
+            </p>
+          ) : (
+            <div className="mt-8 grid gap-6 sm:grid-cols-2">
+              {feed.map((item) => (
+                <article key={item.id} className="deed-row overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.photoUrl}
+                    alt=""
+                    className="aspect-[4/3] w-full rounded-2xl object-cover"
+                  />
+                  <div className="mt-3">
+                    <p className="font-medium text-[var(--ink)]">{item.title}</p>
+                    <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                      {item.authorName}
+                      {item.isYou ? " · это ты" : ""} ·{" "}
+                      {categoryLabel[item.category] ?? item.category} · +
+                      {item.points}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         <section id="board" className="scroll-mt-10">
@@ -427,6 +573,14 @@ export function AppShell() {
             ) : (
               deeds.map((deed) => (
                 <li key={deed.id} className="deed-row flex gap-4 py-4">
+                  {deed.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={deed.photoUrl}
+                      alt=""
+                      className="h-20 w-20 shrink-0 rounded-xl object-cover"
+                    />
+                  ) : null}
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-[var(--ink)]">{deed.title}</p>
                     <p className="mt-1 text-sm text-[var(--ink-soft)]">

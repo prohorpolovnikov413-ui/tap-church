@@ -5,6 +5,7 @@ import {
   requireIdentity,
 } from "@/lib/auth";
 import { sql } from "@/lib/db";
+import { parsePhotoDataUrl } from "@/lib/photo";
 
 export const dynamic = "force-dynamic";
 
@@ -14,14 +15,26 @@ type DeedRow = {
   category: string;
   points: number;
   created_at: string | Date;
+  photo_data: string | null;
 };
+
+function mapDeed(row: DeedRow) {
+  return {
+    id: Number(row.id),
+    title: row.title,
+    category: row.category,
+    points: row.points,
+    createdAt: new Date(row.created_at).toISOString(),
+    photoUrl: row.photo_data || null,
+  };
+}
 
 export async function GET(request: Request) {
   const identity = await requireIdentity(request);
   if (identity instanceof Response) return identity;
 
   const rows = await sql<DeedRow>(
-    `select id, title, category, points, created_at
+    `select id, title, category, points, created_at, photo_data
      from deeds
      where user_id = $1
      order by created_at desc
@@ -30,15 +43,7 @@ export async function GET(request: Request) {
   );
 
   return Response.json(
-    {
-      deeds: rows.map((row) => ({
-        id: Number(row.id),
-        title: row.title,
-        category: row.category,
-        points: row.points,
-        createdAt: new Date(row.created_at).toISOString(),
-      })),
-    },
+    { deeds: rows.map(mapDeed) },
     { headers: privateHeaders },
   );
 }
@@ -53,7 +58,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { title?: unknown; category?: unknown };
+  let body: { title?: unknown; category?: unknown; photo?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -68,6 +73,7 @@ export async function POST(request: Request) {
   const categoryId =
     typeof body.category === "string" ? body.category.trim() : "";
   const category = getCategory(categoryId);
+  const photo = parsePhotoDataUrl(body.photo);
 
   if (title.length < 3) {
     return Response.json(
@@ -78,6 +84,12 @@ export async function POST(request: Request) {
   if (!category) {
     return Response.json(
       { error: "Выбери категорию" },
+      { status: 400, headers: privateHeaders },
+    );
+  }
+  if (photo && "error" in photo) {
+    return Response.json(
+      { error: photo.error },
       { status: 400, headers: privateHeaders },
     );
   }
@@ -93,22 +105,20 @@ export async function POST(request: Request) {
   );
 
   const [row] = await sql<DeedRow>(
-    `insert into deeds (user_id, title, category, points)
-     values ($1, $2, $3, $4)
-     returning id, title, category, points, created_at`,
-    [identity.sub, title, category.id, category.points],
+    `insert into deeds (user_id, title, category, points, photo_data)
+     values ($1, $2, $3, $4, $5)
+     returning id, title, category, points, created_at, photo_data`,
+    [
+      identity.sub,
+      title,
+      category.id,
+      category.points,
+      photo?.dataUrl ?? null,
+    ],
   );
 
   return Response.json(
-    {
-      deed: {
-        id: Number(row.id),
-        title: row.title,
-        category: row.category,
-        points: row.points,
-        createdAt: new Date(row.created_at).toISOString(),
-      },
-    },
+    { deed: mapDeed(row) },
     { status: 201, headers: privateHeaders },
   );
 }
