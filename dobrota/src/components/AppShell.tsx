@@ -40,6 +40,15 @@ function formatDate(iso: string) {
   }).format(new Date(iso));
 }
 
+function deedsWord(count: number) {
+  const n = Math.abs(count) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return "дел";
+  if (n1 === 1) return "дело";
+  if (n1 >= 2 && n1 <= 4) return "дела";
+  return "дел";
+}
+
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null);
   const [deeds, setDeeds] = useState<Deed[]>([]);
@@ -258,7 +267,7 @@ export function AppShell() {
                       key={item.id}
                       className={`cursor-pointer rounded-2xl border px-4 py-3 transition ${
                         active
-                          ? "border-[var(--leaf)] bg-[var(--leaf)]/10"
+                          ? "border-[var(--leaf-deep)] bg-[var(--leaf)]/15 shadow-[inset_0_0_0_1px_var(--leaf-deep)]"
                           : "border-[var(--line)] bg-white/50 hover:bg-white/80"
                       }`}
                     >
@@ -301,7 +310,7 @@ export function AppShell() {
                   <strong className="text-[var(--ink)]">{me.totalPoints}</strong>{" "}
                   баллов и{" "}
                   <strong className="text-[var(--ink)]">{me.deedCount}</strong>{" "}
-                  дел
+                  {deedsWord(me.deedCount)}
                 </p>
               ) : null}
             </div>
@@ -378,12 +387,7 @@ export function AppShell() {
                       ) : null}
                     </p>
                     <p className="text-sm text-[var(--ink-soft)]">
-                      {entry.deedCount}{" "}
-                      {entry.deedCount === 1
-                        ? "дело"
-                        : entry.deedCount < 5
-                          ? "дела"
-                          : "дел"}
+                      {entry.deedCount} {deedsWord(entry.deedCount)}
                     </p>
                   </div>
                   <span
