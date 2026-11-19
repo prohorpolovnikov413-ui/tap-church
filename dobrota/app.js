@@ -38,11 +38,15 @@
       day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow'
     }).format(new Date(iso));
   }
-  function show(el, text, on) {
+  function show(el, text, on, kind) {
     if (!el) return;
     if (!on) { el.classList.add('hidden'); el.textContent = ''; return; }
     el.textContent = text;
     el.classList.remove('hidden');
+    if (el.id === 'flash') {
+      el.classList.toggle('ok', kind !== 'err');
+      el.classList.toggle('err', kind === 'err');
+    }
   }
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -130,7 +134,35 @@
   }
   function updateAddLabel() {
     const c = CATS.find((x) => x.id === category);
-    $('btn-add').textContent = busy ? 'Сохраняем…' : `Добавить · +${c.points}`;
+    $('btn-add').textContent = busy ? 'Проверяем…' : `Добавить · +${c.points}`;
+  }
+
+  function statusBadge(status, reason) {
+    const s = status || 'approved';
+    if (s === 'pending') {
+      return `<span class="badge badge-pending">проверяется…</span>`;
+    }
+    if (s === 'rejected') {
+      return `<span class="badge badge-bad">❌ отклонено</span>${reason ? `<span class="reason">${esc(reason)}</span>` : ''}`;
+    }
+    return `<span class="badge badge-ok">✅ принято</span>`;
+  }
+
+  let pollTimer = null;
+  function stopPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function startPollIfPending(data) {
+    stopPoll();
+    const pending = (data.deeds || []).some((d) => d.status === 'pending');
+    if (!pending) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const next = await api('/dobro/state?id=' + encodeURIComponent(user.id));
+        renderState(next);
+        if (!(next.deeds || []).some((d) => d.status === 'pending')) stopPoll();
+      } catch {}
+    }, 2000);
   }
 
   function setTab(name) {
@@ -170,8 +202,8 @@
       <article class="card">
         <img src="${esc(item.photoUrl)}" alt="">
         <p class="t">${esc(item.title)}</p>
-        <p class="m">${esc(item.authorName)}${item.isYou ? ' · это вы' : ''} · ${esc(LABELS[item.category] || item.category)} · +${item.points}</p>
-      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет фото — добавьте первое выше.</p>';
+        <p class="m">${esc(item.authorName)}${item.isYou ? ' · это вы' : ''} · ${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
+      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет подтверждённых фото — добавьте дело с живым снимком.</p>';
 
     const board = data.board || [];
     $('board-list').innerHTML = board.length ? board.map((e) => `
@@ -184,12 +216,16 @@
 
     const deeds = data.deeds || [];
     $('hist-list').innerHTML = deeds.length ? deeds.map((d) => `
-      <li>
+      <li class="deed-item status-${esc(d.status || 'approved')}">
         ${d.photoUrl ? `<img class="thumb" src="${esc(d.photoUrl)}" alt="">` : ''}
-        <div class="grow"><p>${esc(d.title)}</p>
-        <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p></div>
-        <span class="pts-sm">+${d.points}</span>
-      </li>`).join('') : '<li class="muted">Записей ещё нет — добавьте первое дело выше.</li>';
+        <div class="grow">
+          <p>${esc(d.title)}</p>
+          <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p>
+          <div class="status-row">${statusBadge(d.status, d.reason)}</div>
+        </div>
+        <span class="pts-sm">${d.status === 'rejected' || d.status === 'pending' ? '—' : '+' + (d.points || 0)}</span>
+      </li>`).join('') : '<li class="muted">Записей ещё нет — добавьте первое дело с фото.</li>';
+    startPollIfPending(data);
   }
 
   async function loadAll() {
@@ -257,6 +293,10 @@
   $('deed-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (busy) return;
+    if (!photo) {
+      show($('error'), 'Добавьте фото доброго дела — без него запись не принимается', true);
+      return;
+    }
     busy = true;
     updateAddLabel();
     show($('error'), '', false);
@@ -274,10 +314,16 @@
         })
       });
       $('title').value = '';
-      const pts = data.deed && data.deed.points;
-      const had = !!photo;
       clearPhoto();
-      show($('flash'), had ? `+${pts} баллов · фото сохранено` : `+${pts} баллов за доброе дело`, true);
+      const st = data.deed && data.deed.status;
+      if (st === 'pending' || !st) {
+        show($('flash'), 'Отправлено · фото проверяется…', true, 'ok');
+      } else if (st === 'approved') {
+        show($('flash'), `✅ Принято · +${data.deed.points} баллов`, true, 'ok');
+      } else {
+        show($('flash'), `❌ Отклонено: ${(data.deed && data.deed.reason) || 'фото не подошло'}`, true, 'err');
+      }
+      setTab('history');
       await loadAll();
     } catch (e) {
       show($('error'), e.message || 'Ошибка', true);
