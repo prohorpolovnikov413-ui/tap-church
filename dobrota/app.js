@@ -133,10 +133,37 @@
     $('btn-add').textContent = busy ? 'Сохраняем…' : `Добавить · +${c.points}`;
   }
 
+  function setTab(name) {
+    const titles = {
+      add: 'Новое дело',
+      feed: 'Лента',
+      board: 'Рейтинг',
+      history: 'История',
+      profile: 'Профиль'
+    };
+    document.querySelectorAll('.panel').forEach((p) => {
+      const on = p.id === 'panel-' + name;
+      p.classList.toggle('active', on);
+      if (on) p.removeAttribute('hidden');
+      else p.setAttribute('hidden', '');
+    });
+    document.querySelectorAll('.tab').forEach((t) => {
+      t.classList.toggle('on', t.getAttribute('data-tab') === name);
+    });
+    const title = $('app-title');
+    if (title) title.textContent = titles[name] || 'Доброта';
+    const main = $('app-main');
+    if (main) main.scrollTop = 0;
+  }
+
   function renderState(data) {
     const me = data.me || { name: user.name, totalPoints: 0, deedCount: 0 };
     $('nick').value = me.name || user.name;
     $('me-line').innerHTML = `У вас сейчас <strong>${me.totalPoints}</strong> баллов и <strong>${me.deedCount}</strong> ${deedsWord(me.deedCount)}`;
+    const chip = $('me-chip');
+    if (chip) chip.textContent = `${me.name || user.name} · ${me.totalPoints} б.`;
+    const note = $('profile-note');
+    if (note) note.textContent = `${me.totalPoints} баллов · ${me.deedCount} ${deedsWord(me.deedCount)}`;
 
     const feed = data.feed || [];
     $('feed-list').innerHTML = feed.length ? `<div class="feed">${feed.map((item) => `
@@ -181,11 +208,12 @@
     }
   }
 
-  function enterApp() {
+  function enterApp(initialTab) {
     gate.classList.add('hidden');
     app.classList.remove('hidden');
     renderCats();
     updateAddLabel();
+    setTab(initialTab || 'feed');
     loadAll();
   }
 
@@ -281,10 +309,16 @@
     }
   });
 
+  document.querySelectorAll('.tab').forEach((btn) => {
+    btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab')));
+  });
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
   }
 
+  const bootTab = new URLSearchParams(location.search).get('tab');
+  const okTab = ['add', 'feed', 'board', 'history', 'profile'].includes(bootTab) ? bootTab : 'feed';
   user = loadUser();
-  if (user && user.id && user.name) enterApp();
+  if (user && user.id && user.name) enterApp(okTab);
 })();

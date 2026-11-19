@@ -2,10 +2,14 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#1d1d1b" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1d1d1b">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Доброта">
+  <meta name="format-detection" content="telephone=no">
   <title>Доброта</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png" type="image/png">
@@ -21,7 +25,7 @@
       <p class="brand">Доброта</p>
       <h1 class="lead">Делай доброе дело — сфотографируй — поднимайся в рейтинге</h1>
       <p class="sub">Как вас зовут? Это имя будет в общем рейтинге. Его можно будет сменить позже.</p>
-      <form id="gate-form" class="nick-form" style="flex-direction:column;align-items:stretch">
+      <form id="gate-form" class="nick-form gate-form">
         <label>
           <span>Ваше имя</span>
           <input type="text" id="gate-name" maxlength="40" required placeholder="Например, Мария" autocomplete="nickname">
@@ -32,34 +36,33 @@
     </div>
   </div>
 
-  <div id="app" class="hidden">
-    <div class="wrap">
-      <header class="hero">
-        <p class="brand">Доброта</p>
-        <h1 class="lead">Делай доброе дело — сфотографируй — поднимайся в рейтинге</h1>
-        <p class="sub">Отмечай хорошие поступки, прикрепляй фото и смотри, как тепло распространяется в общей ленте.</p>
-        <div class="nav">
-          <a class="btn" href="#add">Отметить доброе дело</a>
-          <a class="btn btn-ghost" href="#feed">Лента с фото</a>
-        </div>
-      </header>
+  <div id="app" class="app-shell hidden">
+    <header class="app-top">
+      <div class="app-top-inner">
+        <p class="app-title" id="app-title">Доброта</p>
+        <p class="app-sub" id="me-chip"></p>
+      </div>
+    </header>
 
+    <div class="app-status">
       <p id="flash" class="msg ok hidden"></p>
       <p id="error" class="msg err hidden"></p>
       <p id="loading" class="msg info">Загружаем…</p>
+    </div>
 
-      <section id="add" class="sec">
+    <main class="app-main" id="app-main">
+      <section id="panel-add" class="panel" data-title="Новое дело" hidden>
         <p class="kicker">Новая запись</p>
         <h2>Что хорошего вы сделали?</h2>
-        <p class="hint">Опишите дело, выберите категорию и при желании добавьте фото с телефона или камеры.</p>
+        <p class="hint">Опишите дело, выберите категорию и при желании добавьте фото.</p>
         <form id="deed-form">
-          <label style="display:block;margin:1.2rem 0">
+          <label class="block-label">
             <span>Описание</span>
             <textarea id="title" maxlength="160" required placeholder="Например: помог соседке донести сумки до двери"></textarea>
           </label>
           <div>
             <p class="lbl">Фото доброго дела</p>
-            <p class="hint" style="margin-top:0">Необязательно. На телефоне можно сразу открыть камеру.</p>
+            <p class="hint tight">Необязательно. На телефоне можно сразу открыть камеру.</p>
             <div class="photo-actions">
               <button type="button" class="btn btn-ghost" id="btn-camera">Сфотографировать</button>
               <button type="button" class="btn btn-ghost" id="btn-gallery">Из галереи</button>
@@ -69,25 +72,39 @@
             <input id="gal" class="file" type="file" accept="image/jpeg,image/png,image/webp">
             <img id="preview" class="preview hidden" alt="Превью фото">
           </div>
-          <fieldset class="cats" id="cats" style="margin-top:1.2rem"></fieldset>
-          <div class="row-actions" style="margin-top:1.1rem">
+          <fieldset class="cats" id="cats"></fieldset>
+          <div class="row-actions">
             <button class="btn" id="btn-add" type="submit">Добавить</button>
             <p class="muted" id="me-line"></p>
           </div>
         </form>
       </section>
 
-      <section id="feed" class="sec">
+      <section id="panel-feed" class="panel active" data-title="Лента">
         <p class="kicker">Лента</p>
         <h2>Добрые дела в кадре</h2>
         <p class="hint">Последние записи с фото от всех участников.</p>
         <div id="feed-list"></div>
       </section>
 
-      <section id="board" class="sec">
+      <section id="panel-board" class="panel" data-title="Рейтинг" hidden>
         <p class="kicker">Рейтинг</p>
         <h2>Кто поднимается выше</h2>
         <p class="hint">Чем больше добрых дел и баллов — тем выше место в таблице.</p>
+        <ol class="board" id="board-list"></ol>
+      </section>
+
+      <section id="panel-history" class="panel" data-title="История" hidden>
+        <p class="kicker">Ваши дела</p>
+        <h2>История доброты</h2>
+        <p class="hint">Все добрые дела, которые вы уже отметили.</p>
+        <ul class="hist" id="hist-list"></ul>
+      </section>
+
+      <section id="panel-profile" class="panel" data-title="Профиль" hidden>
+        <p class="kicker">Профиль</p>
+        <h2>Ваше имя в рейтинге</h2>
+        <p class="hint">Имя видно всем участникам. Его можно сменить в любой момент.</p>
         <form id="nick-form" class="nick-form">
           <label>
             <span>Имя в рейтинге</span>
@@ -95,17 +112,32 @@
           </label>
           <button class="btn btn-ghost" type="submit">Сохранить имя</button>
         </form>
-        <ol class="board" id="board-list"></ol>
+        <p class="profile-note muted" id="profile-note"></p>
       </section>
+    </main>
 
-      <section id="history" class="sec">
-        <p class="kicker">Ваши дела</p>
-        <h2>История доброты</h2>
-        <p class="hint">Все добрые дела, которые вы уже отметили.</p>
-        <ul class="hist" id="hist-list"></ul>
-      </section>
-    </div>
-    <footer>Доброта — маленькие шаги, которые складываются в большую таблицу тепла.</footer>
+    <nav class="tabbar" aria-label="Главное меню">
+      <button type="button" class="tab on" data-tab="feed" aria-label="Лента">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4V5zm0 6h10v4H4v-4zm0 6h16v2H4v-2z"/></svg>
+        <span>Лента</span>
+      </button>
+      <button type="button" class="tab" data-tab="history" aria-label="История">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-7.45 5.1l1.86.64A6 6 0 1 0 12 6V3l4 3.5L12 10V7a5 5 0 1 1-4.9 6.1l-1.96.4A7 7 0 1 0 12 4z"/></svg>
+        <span>История</span>
+      </button>
+      <button type="button" class="tab tab-fab" data-tab="add" aria-label="Добавить дело">
+        <span class="fab">+</span>
+        <span>Дело</span>
+      </button>
+      <button type="button" class="tab" data-tab="board" aria-label="Рейтинг">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V10h3v10H7zm5 0V4h3v16h-3zm5 0v-7h3v7h-3z"/></svg>
+        <span>Рейтинг</span>
+      </button>
+      <button type="button" class="tab" data-tab="profile" aria-label="Профиль">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm0 2c-4 0-7 2-7 4v2h14v-2c0-2-3-4-7-4z"/></svg>
+        <span>Профиль</span>
+      </button>
+    </nav>
   </div>
   <script src="app.js"></script>
 </body>
