@@ -1,6 +1,7 @@
 (() => {
   const API = 'https://zavhoz-board.sj-polomki.workers.dev';
   const STORE = 'dobrota-user-v1';
+  const RULES_SEEN = 'dobrota-rules-seen-v1';
   const CATS = [
     { id: 'smile', label: 'Маленькая радость', hint: 'улыбка, комплимент, тёплое слово', points: 5 },
     { id: 'help', label: 'Практическая помощь', hint: 'помог с сумками, делом, дорогой', points: 15 },
@@ -12,7 +13,7 @@
 
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), app = $('app');
-  let user = null, photo = null, category = 'help', busy = false;
+  let user = null, photo = null, category = 'help', busy = false, prevTab = 'feed';
 
   function loadUser() {
     try { return JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { return null; }
@@ -165,14 +166,23 @@
     }, 2000);
   }
 
+  function rulesSeen() {
+    try { return localStorage.getItem(RULES_SEEN) === '1'; } catch { return false; }
+  }
+  function markRulesSeen() {
+    try { localStorage.setItem(RULES_SEEN, '1'); } catch {}
+  }
+
   function setTab(name) {
     const titles = {
       add: 'Новое дело',
       feed: 'Лента',
       board: 'Рейтинг',
       history: 'История',
-      profile: 'Профиль'
+      profile: 'Профиль',
+      rules: 'Правила'
     };
+    if (name !== 'rules') prevTab = name;
     document.querySelectorAll('.panel').forEach((p) => {
       const on = p.id === 'panel-' + name;
       p.classList.toggle('active', on);
@@ -180,12 +190,23 @@
       else p.setAttribute('hidden', '');
     });
     document.querySelectorAll('.tab').forEach((t) => {
-      t.classList.toggle('on', t.getAttribute('data-tab') === name);
+      const tab = t.getAttribute('data-tab');
+      t.classList.toggle('on', name === 'rules' ? tab === prevTab : tab === name);
     });
     const title = $('app-title');
     if (title) title.textContent = titles[name] || 'Доброта';
     const main = $('app-main');
     if (main) main.scrollTop = 0;
+    if (name === 'add' && !rulesSeen()) openRules(true);
+  }
+
+  function openRules(fromFirstDeed) {
+    if (fromFirstDeed) markRulesSeen();
+    setTab('rules');
+  }
+  function closeRules() {
+    markRulesSeen();
+    setTab(prevTab === 'rules' ? 'add' : prevTab || 'add');
   }
 
   function renderState(data) {
@@ -358,13 +379,19 @@
   document.querySelectorAll('.tab').forEach((btn) => {
     btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab')));
   });
+  const btnRulesAdd = $('btn-rules-add');
+  const btnRulesProfile = $('btn-rules-profile');
+  const btnRulesDone = $('btn-rules-done');
+  if (btnRulesAdd) btnRulesAdd.addEventListener('click', () => openRules(false));
+  if (btnRulesProfile) btnRulesProfile.addEventListener('click', () => openRules(false));
+  if (btnRulesDone) btnRulesDone.addEventListener('click', closeRules);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
   }
 
   const bootTab = new URLSearchParams(location.search).get('tab');
-  const okTab = ['add', 'feed', 'board', 'history', 'profile'].includes(bootTab) ? bootTab : 'feed';
+  const okTab = ['add', 'feed', 'board', 'history', 'profile', 'rules'].includes(bootTab) ? bootTab : 'feed';
   user = loadUser();
   if (user && user.id && user.name) enterApp(okTab);
 })();
