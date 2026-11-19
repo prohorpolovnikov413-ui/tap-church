@@ -1,4 +1,4 @@
-const CACHE = 'dobrota-v3';
+const CACHE = 'dobrota-v4';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
