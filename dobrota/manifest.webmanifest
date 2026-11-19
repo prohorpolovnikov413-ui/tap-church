@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#1d1d1b",
-  "theme_color": "#1d1d1b",
+  "background_color": "#121212",
+  "theme_color": "#121212",
   "categories": ["lifestyle", "social"],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
