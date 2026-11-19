@@ -283,8 +283,375 @@ async function registerRefCode(kv, id, code) {
   if (!existing) await kv.put('r:' + code, id);
 }
 
+
+const DOBRO_KEY = 'dobro:v1';
+const DOBRO_FEED_MAX = 50;
+const DOBRO_HIST_MAX = 50;
+const DOBRO_PHOTO_MAX = 60 * 1024;
+const DOBRO_DEED_MS = 10000;
+const DOBRO_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
+const DOBRO_PHASH_PREFIX = 'dobro:phash:';
+const DOBRO_CATS = {
+  smile: { id: 'smile', points: 5, label: 'Маленькая радость' },
+  help: { id: 'help', points: 15, label: 'Практическая помощь' },
+  care: { id: 'care', points: 25, label: 'Забота и внимание' },
+  big: { id: 'big', points: 50, label: 'Большое дело' },
+  volunteer: { id: 'volunteer', points: 80, label: 'Волонтёрство' }
+};
+
+function cleanDobroName(raw) {
+  if (typeof raw !== 'string') return { ok: false, error: 'nick' };
+  let s = stripBlankish(raw).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  if (s.length < 2 || s.length > 40) return { ok: false, error: 'nick' };
+  if (!/^[0-9A-Za-zА-Яа-яЁёІіЇїЄєҐґ _-]+$/.test(s)) return { ok: false, error: 'nick' };
+  if (!s.replace(/[\s_-]+/g, '').length) return { ok: false, error: 'nick' };
+  const low = s.toLowerCase();
+  for (const w of BAD) if (low.includes(w)) return { ok: false, error: 'nick' };
+  return { ok: true, name: s };
+}
+
+function cleanDobroTitle(raw) {
+  if (typeof raw !== 'string') return { ok: false, error: 'title' };
+  let s = stripBlankish(raw).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  if (s.length < 3) return { ok: false, error: 'title' };
+  const low = s.toLowerCase();
+  for (const w of BAD) if (low.includes(w)) return { ok: false, error: 'title' };
+  return { ok: true, title: s };
+}
+
+function parseDobroPhoto(value) {
+  if (value == null || value === '') {
+    return { ok: false, error: 'photo', errorText: 'Нужно приложить фото доброго дела' };
+  }
+  if (typeof value !== 'string') return { ok: false, error: 'photo', errorText: 'Неверный формат фото' };
+  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(value);
+  if (!m) return { ok: false, error: 'photo', errorText: 'Можно только JPEG, PNG или WebP' };
+  const b64 = m[1].replace(/\s+/g, '');
+  if (b64.length < 64) return { ok: false, error: 'photo', errorText: 'Фото повреждено или пустое' };
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  const bytes = Math.floor(b64.length * 3 / 4) - pad;
+  if (bytes > DOBRO_PHOTO_MAX) return { ok: false, error: 'photo', errorText: 'Фото слишком большое' };
+  const mime = value.slice(5, value.indexOf(';'));
+  return { ok: true, photo: `data:${mime};base64,${b64}`, base64: b64 };
+}
+
+async function dobroPhotoHash(base64) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const dig = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(dig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function dobroLooksBlank(base64) {
+  const bin = atob(base64);
+  if (bin.length < 1200) return true;
+  let sum = 0, sumSq = 0, n = 0;
+  const step = Math.max(1, Math.floor(bin.length / 400));
+  for (let i = 0; i < bin.length; i += step) {
+    const v = bin.charCodeAt(i);
+    sum += v; sumSq += v * v; n++;
+  }
+  const mean = sum / n;
+  return (sumSq / n - mean * mean) < 18;
+}
+
+function dobroExtractJson(text) {
+  if (!text) return null;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const raw = (fenced ? fenced[1] : text).trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
+}
+
+function dobroVerifyPrompt(title, categoryLabel) {
+  return [
+    'Ты модератор приложения «Доброта». Проверь фото к записи о добром деле.',
+    `Текст дела: «${title}». Категория: «${categoryLabel}».`,
+    'Одобряй только если на фото видно реальное жизненное событие, правдоподобно связанное с текстом.',
+    'Отклоняй: скриншоты приложений/сайтов, мемы, стоковые картинки из интернета, коллажи, пустые/размытые/чёрные кадры, фото без связи с делом.',
+    'Ответь ТОЛЬКО JSON без markdown: {"approved":true|false,"reason":"кратко по-русски (до 120 символов)"}'
+  ].join('\n');
+}
+
+async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, userId }) {
+  const hash = await dobroPhotoHash(base64);
+  const hashKey = DOBRO_PHASH_PREFIX + hash;
+  const used = await env.KV.get(hashKey);
+  if (used) {
+    return {
+      status: 'rejected',
+      reason: used === userId ? 'Вы уже отправляли это же фото' : 'Это фото уже использовали раньше',
+      hash
+    };
+  }
+  if (dobroLooksBlank(base64)) {
+    return { status: 'rejected', reason: 'Фото пустое или слишком маленькое', hash };
+  }
+  if (!env.AI || typeof env.AI.run !== 'function') {
+    return { status: 'rejected', reason: 'Проверка фото временно недоступна (нет AI binding)', hash };
+  }
+
+  let modelText = '';
+  try {
+    const result = await env.AI.run(DOBRO_VISION_MODEL, {
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: dobroVerifyPrompt(title, categoryLabel) },
+          { type: 'image_url', image_url: { url: photo } }
+        ]
+      }],
+      max_tokens: 200
+    });
+    modelText = (typeof result === 'string' && result)
+      || result?.response || result?.description || result?.result
+      || (Array.isArray(result?.content) ? result.content.map((c) => c.text || '').join(' ') : '')
+      || JSON.stringify(result);
+  } catch {
+    try {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const result = await env.AI.run(DOBRO_VISION_MODEL, {
+        prompt: dobroVerifyPrompt(title, categoryLabel),
+        image: [...bytes],
+        max_tokens: 200
+      });
+      modelText = (typeof result === 'string' && result)
+        || result?.response || result?.description || JSON.stringify(result);
+    } catch {
+      return { status: 'rejected', reason: 'Не удалось проверить фото. Попробуйте ещё раз', hash };
+    }
+  }
+
+  const parsed = dobroExtractJson(String(modelText));
+  const approved = !!(parsed && parsed.approved === true);
+  let reason = String((parsed && parsed.reason) || '').trim().slice(0, 140);
+  if (!reason) {
+    reason = approved ? 'Фото подтверждает доброе дело' : 'Фото не подтверждает описанное дело';
+  }
+  if (approved) {
+    await env.KV.put(hashKey, userId, { expirationTtl: 60 * 60 * 24 * 180 });
+  }
+  return { status: approved ? 'approved' : 'rejected', reason, hash };
+}
+
+function emptyDobro() {
+  return { users: {}, feed: [], seq: 1 };
+}
+
+async function getDobro(kv) {
+  const state = await readJson(kv, DOBRO_KEY, null);
+  if (!state || typeof state !== 'object') return emptyDobro();
+  if (!state.users || typeof state.users !== 'object') state.users = {};
+  if (!Array.isArray(state.feed)) state.feed = [];
+  if (!state.seq) state.seq = 1;
+  return state;
+}
+
+async function putDobro(kv, state) {
+  await kv.put(DOBRO_KEY, JSON.stringify(state));
+}
+
+function pruneDobroPhotos(state) {
+  if (state.feed.length > DOBRO_FEED_MAX) state.feed = state.feed.slice(0, DOBRO_FEED_MAX);
+  const keep = new Set();
+  for (const item of state.feed) if (item.photo) keep.add(item.id);
+  for (const u of Object.values(state.users)) {
+    if (!Array.isArray(u.deeds)) u.deeds = [];
+    if (u.deeds.length > DOBRO_HIST_MAX) u.deeds = u.deeds.slice(0, DOBRO_HIST_MAX);
+    for (const d of u.deeds) {
+      if (d.photo && !keep.has(d.id)) delete d.photo;
+    }
+  }
+}
+
+function publicDobro(state, id) {
+  const u = (id && state.users[id]) || null;
+  const board = Object.entries(state.users)
+    .filter(([, rec]) => (rec.deedCount || 0) > 0)
+    .map(([uid, rec]) => ({
+      id: uid,
+      name: rec.name || 'Участник',
+      totalPoints: rec.points || 0,
+      deedCount: rec.deedCount || 0
+    }))
+    .sort((a, b) => b.totalPoints - a.totalPoints || b.deedCount - a.deedCount || a.name.localeCompare(b.name, 'ru'))
+    .slice(0, 30)
+    .map((e, i) => ({
+      rank: i + 1,
+      name: e.name,
+      totalPoints: e.totalPoints,
+      deedCount: e.deedCount,
+      isYou: e.id === id
+    }));
+  const feed = state.feed.filter((item) => item.photo && (item.status || 'approved') === 'approved').slice(0, DOBRO_FEED_MAX).map((item) => ({
+    id: item.id,
+    title: item.title,
+    category: item.category,
+    points: item.points,
+    createdAt: item.createdAt,
+    photoUrl: item.photo,
+    authorName: item.authorName,
+    isYou: item.authorId === id,
+    status: item.status || 'approved',
+    reason: item.reason || ''
+  }));
+  const deeds = u && Array.isArray(u.deeds) ? u.deeds.map((d) => ({
+    id: d.id,
+    title: d.title,
+    category: d.category,
+    points: d.status === 'approved' || !d.status ? (d.points || 0) : 0,
+    createdAt: d.createdAt,
+    photoUrl: d.photo || null,
+    status: d.status || 'approved',
+    reason: d.reason || ''
+  })) : [];
+  return {
+    ok: true,
+    me: {
+      name: (u && u.name) || '',
+      totalPoints: (u && u.points) || 0,
+      deedCount: (u && u.deedCount) || 0
+    },
+    board,
+    feed,
+    deeds
+  };
+}
+
+async function handleDobro(request, env, ctx, url, path, origin) {
+  if (request.method === 'GET' && (path === '/dobro/ping' || path === '/dobro')) {
+    return json({ ok: true, app: 'dobrota' }, 200, origin);
+  }
+  if (request.method === 'GET' && path === '/dobro/state') {
+    const id = url.searchParams.get('id') || '';
+    if (id && !validId(id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    return json(publicDobro(state, id || ''), 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/nick') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const nm = cleanDobroName(body.name);
+    if (!nm.ok) return json({ ok: false, error: 'nick' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const rec = state.users[body.id] || { name: nm.name, points: 0, deedCount: 0, deeds: [], lastAt: 0 };
+    rec.name = nm.name;
+    state.users[body.id] = rec;
+    for (const item of state.feed) {
+      if (item.authorId === body.id) item.authorName = nm.name;
+    }
+    await putDobro(env.KV, state);
+    return json({ ok: true, name: nm.name }, 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/deed') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const title = cleanDobroTitle(body.title);
+    if (!title.ok) return json({ ok: false, error: 'title' }, 400, origin);
+    const cat = DOBRO_CATS[body.category];
+    if (!cat) return json({ ok: false, error: 'category' }, 400, origin);
+    const pic = parseDobroPhoto(body.photo);
+    if (!pic.ok) {
+      return json({ ok: false, error: 'photo', errorText: pic.errorText || 'Нужно приложить фото' }, 400, origin);
+    }
+    const state = await getDobro(env.KV);
+    const now = Date.now();
+    let rec = state.users[body.id];
+    if (!rec) {
+      const nm = cleanDobroName(body.name);
+      if (!nm.ok) return json({ ok: false, error: 'nick' }, 400, origin);
+      rec = { name: nm.name, points: 0, deedCount: 0, deeds: [], lastAt: 0 };
+      state.users[body.id] = rec;
+    } else if (body.name && !rec.name) {
+      const nm = cleanDobroName(body.name);
+      if (nm.ok) rec.name = nm.name;
+    }
+    if (rec.lastAt && now - rec.lastAt < DOBRO_DEED_MS) {
+      return json({ ok: false, error: 'rate' }, 429, origin);
+    }
+    const deedId = state.seq++;
+    const deed = {
+      id: deedId,
+      title: title.title,
+      category: cat.id,
+      points: 0,
+      awardPoints: cat.points,
+      createdAt: new Date(now).toISOString(),
+      photo: pic.photo,
+      status: 'pending',
+      reason: 'Проверяем фото…'
+    };
+    rec.deeds.unshift(deed);
+    rec.lastAt = now;
+    pruneDobroPhotos(state);
+    await putDobro(env.KV, state);
+
+    const userId = body.id;
+    const authorName = rec.name || 'Участник';
+    const runVerify = async () => {
+      const result = await verifyDobroPhoto(env, {
+        title: title.title,
+        categoryLabel: cat.label,
+        photo: pic.photo,
+        base64: pic.base64,
+        userId
+      });
+      const st = await getDobro(env.KV);
+      const user = st.users[userId];
+      if (!user || !Array.isArray(user.deeds)) return;
+      const idx = user.deeds.findIndex((d) => d.id === deedId);
+      if (idx < 0) return;
+      const cur = user.deeds[idx];
+      cur.status = result.status;
+      cur.reason = result.reason;
+      if (result.status === 'approved') {
+        cur.points = cur.awardPoints || cat.points;
+        user.points = (user.points || 0) + cur.points;
+        user.deedCount = (user.deedCount || 0) + 1;
+        st.feed.unshift({
+          id: cur.id,
+          title: cur.title,
+          category: cur.category,
+          points: cur.points,
+          createdAt: cur.createdAt,
+          photo: cur.photo,
+          authorName,
+          authorId: userId,
+          status: 'approved',
+          reason: result.reason
+        });
+      } else {
+        cur.points = 0;
+      }
+      pruneDobroPhotos(st);
+      await putDobro(env.KV, st);
+    };
+
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(runVerify());
+    else await runVerify();
+
+    return json({
+      ok: true,
+      deed: {
+        id: deed.id,
+        title: deed.title,
+        category: deed.category,
+        points: 0,
+        createdAt: deed.createdAt,
+        photoUrl: deed.photo || null,
+        status: 'pending',
+        reason: deed.reason
+      }
+    }, 201, origin);
+  }
+  return json({ ok: false, error: 'not_found' }, 404, origin);
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get('origin') || '';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
 
@@ -681,6 +1048,10 @@ export default {
         const snap = { save, syncAt: incAt, updated: now, fp };
         await env.KV.put('sv:' + id, JSON.stringify(snap));
         return json({ ok: true, syncAt: incAt }, 200, origin);
+      }
+
+      if (path === '/dobro' || path.startsWith('/dobro/')) {
+        return await handleDobro(request, env, ctx, url, path, origin);
       }
 
       return json({ ok: false, error: 'not_found' }, 404, origin);
