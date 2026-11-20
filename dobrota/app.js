@@ -218,10 +218,20 @@
     $('btn-add').textContent = busy ? 'Проверяем…' : `Добавить · +${c.points}`;
   }
 
+  function isRecoverableDeed(d) {
+    if (!d) return false;
+    if (d.status === 'error') return true;
+    if (d.status !== 'rejected') return false;
+    return /не удалось проверить|временно недоступн|нет ai|попробуйте ещё|попробуйте чуть|автоматически/i.test(d.reason || '');
+  }
+
   function statusBadge(status, reason) {
     const s = status || 'approved';
     if (s === 'pending') {
       return `<span class="badge badge-pending">проверяется…</span>`;
+    }
+    if (s === 'error') {
+      return `<span class="badge badge-pending">сбой проверки</span>${reason ? `<span class="reason">${esc(reason)}</span>` : ''}`;
     }
     if (s === 'rejected') {
       return `<span class="badge badge-bad">❌ отклонено</span>${reason ? `<span class="reason">${esc(reason)}</span>` : ''}`;
@@ -341,11 +351,40 @@
         <div class="grow">
           <p>${esc(d.title)}</p>
           <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p>
-          <div class="status-row">${statusBadge(d.status, d.reason)}</div>
+          <div class="status-row">${statusBadge(d.status, d.reason)}${
+            isRecoverableDeed(d)
+              ? `<button type="button" class="btn btn-ghost recover-deed" data-deed-id="${d.id}">Принять</button>`
+              : ''
+          }</div>
         </div>
-        <span class="pts-sm">${d.status === 'rejected' || d.status === 'pending' ? '—' : '+' + (d.points || 0)}</span>
+        <span class="pts-sm">${d.status === 'rejected' || d.status === 'pending' || d.status === 'error' ? '—' : '+' + (d.points || 0)}</span>
       </li>`).join('') : '<li class="muted">Записей ещё нет — добавьте первое дело с фото.</li>';
+    $('hist-list').querySelectorAll('.recover-deed').forEach((btn) => {
+      btn.addEventListener('click', () => recoverDeed(Number(btn.getAttribute('data-deed-id')), btn));
+    });
     startPollIfPending(data);
+  }
+
+  async function recoverDeed(deedId, btn) {
+    if (busy || !user || !Number.isFinite(deedId)) return;
+    busy = true;
+    if (btn) btn.disabled = true;
+    show($('error'), '', false);
+    show($('flash'), '', false);
+    try {
+      const data = await api('/dobro/deed/recover', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id, deedId })
+      });
+      show($('flash'), `Принято · +${(data.deed && data.deed.points) || 0} баллов`, true, 'ok');
+      await loadAll();
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось принять дело', true);
+      if (btn) btn.disabled = false;
+    } finally {
+      busy = false;
+    }
   }
 
   async function loadAll() {

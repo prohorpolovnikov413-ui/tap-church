@@ -290,6 +290,7 @@ const DOBRO_HIST_MAX = 50;
 const DOBRO_PHOTO_MAX = 60 * 1024;
 const DOBRO_DEED_MS = 10000;
 const DOBRO_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
+const DOBRO_VISION_FALLBACK = '@cf/llava-hf/llava-1.5-7b-hf';
 const DOBRO_PHASH_PREFIX = 'dobro:phash:';
 const DOBRO_CATS = {
   smile: { id: 'smile', points: 5, label: 'Маленькая радость' },
@@ -384,6 +385,91 @@ function dobroVerifyPrompt(title, categoryLabel) {
   ].join('\n');
 }
 
+function dobroErrText(err) {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  try {
+    return String(err.message || err.error || err.statusText || JSON.stringify(err));
+  } catch {
+    return String(err);
+  }
+}
+
+function dobroIsLicenseError(err) {
+  const t = dobroErrText(err).toLowerCase();
+  return /license|agree|acceptable use|aup|terms|must agree|not accepted|meta.?license/.test(t);
+}
+
+function dobroIsVerifyInfraFail(reason) {
+  const t = String(reason || '');
+  return /не удалось проверить|временно недоступн|нет ai|ai binding|попробуйте ещё|попробуйте чуть|автоматически|error/i.test(t);
+}
+
+function dobroAiResultText(result) {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object') return '';
+  return (
+    result.response || result.description || result.result
+    || (Array.isArray(result.content) ? result.content.map((c) => c.text || '').join(' ') : '')
+    || (typeof result === 'object' ? JSON.stringify(result) : '')
+  );
+}
+
+async function dobroAiAgree(env, model) {
+  try {
+    await env.AI.run(model, { prompt: 'agree' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function dobroAiRunOnce(env, model, prompt, photoDataUrl) {
+  // Preferred Workers AI vision shape: prompt + image as data URI string (not huge number[])
+  try {
+    return await env.AI.run(model, {
+      prompt,
+      image: photoDataUrl,
+      max_tokens: 200
+    });
+  } catch (e1) {
+    if (dobroIsLicenseError(e1)) throw e1;
+    // Chat/messages shape with image_url data URI
+    try {
+      return await env.AI.run(model, {
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: photoDataUrl } }
+          ]
+        }],
+        max_tokens: 200
+      });
+    } catch (e2) {
+      if (dobroIsLicenseError(e2)) throw e2;
+      // Last: image as number[] (small photos only — avoid giant payloads)
+      const bytes = Uint8Array.from(atob(photoDataUrl.replace(/^data:[^;]+;base64,/, '')), (c) => c.charCodeAt(0));
+      if (bytes.length > 80 * 1024) throw e2;
+      return await env.AI.run(model, {
+        prompt,
+        image: [...bytes],
+        max_tokens: 200
+      });
+    }
+  }
+}
+
+async function dobroAiRunWithAgree(env, model, prompt, photoDataUrl) {
+  try {
+    return await dobroAiRunOnce(env, model, prompt, photoDataUrl);
+  } catch (err) {
+    if (!dobroIsLicenseError(err)) throw err;
+    await dobroAiAgree(env, model);
+    return await dobroAiRunOnce(env, model, prompt, photoDataUrl);
+  }
+}
+
 async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, userId }) {
   const hash = await dobroPhotoHash(base64);
   const hashKey = DOBRO_PHASH_PREFIX + hash;
@@ -398,39 +484,40 @@ async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, user
   if (dobroLooksBlank(base64)) {
     return { status: 'rejected', reason: 'Кажется, фото пустое — прикрепите обычный снимок', hash };
   }
+  // Fail-open: no AI binding → accept
   if (!env.AI || typeof env.AI.run !== 'function') {
-    return { status: 'rejected', reason: 'Проверка фото временно недоступна. Попробуйте чуть позже', hash };
+    return {
+      status: 'approved',
+      reason: 'Проверка недоступна — принято автоматически',
+      hash,
+      failOpen: true
+    };
   }
 
+  const prompt = dobroVerifyPrompt(title, categoryLabel);
+  const photoDataUrl = photo || (`data:image/jpeg;base64,` + base64);
   let modelText = '';
-  try {
-    const result = await env.AI.run(DOBRO_VISION_MODEL, {
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: dobroVerifyPrompt(title, categoryLabel) },
-          { type: 'image_url', image_url: { url: photo } }
-        ]
-      }],
-      max_tokens: 200
-    });
-    modelText = (typeof result === 'string' && result)
-      || result?.response || result?.description || result?.result
-      || (Array.isArray(result?.content) ? result.content.map((c) => c.text || '').join(' ') : '')
-      || JSON.stringify(result);
-  } catch {
+  let lastErr = null;
+  const models = [DOBRO_VISION_MODEL, DOBRO_VISION_FALLBACK];
+  for (const model of models) {
     try {
-      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-      const result = await env.AI.run(DOBRO_VISION_MODEL, {
-        prompt: dobroVerifyPrompt(title, categoryLabel),
-        image: [...bytes],
-        max_tokens: 200
-      });
-      modelText = (typeof result === 'string' && result)
-        || result?.response || result?.description || JSON.stringify(result);
-    } catch {
-      return { status: 'rejected', reason: 'Не удалось проверить фото. Попробуйте ещё раз', hash };
+      const result = await dobroAiRunWithAgree(env, model, prompt, photoDataUrl);
+      modelText = dobroAiResultText(result);
+      if (modelText) break;
+    } catch (err) {
+      lastErr = err;
     }
+  }
+
+  if (!modelText) {
+    // Fail-open on infra/AI errors (license, format, quota, timeout…)
+    return {
+      status: 'approved',
+      reason: 'Проверка недоступна — принято автоматически',
+      hash,
+      failOpen: true,
+      error: dobroErrText(lastErr).slice(0, 200)
+    };
   }
 
   const parsed = dobroExtractJson(String(modelText));
@@ -446,6 +533,39 @@ async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, user
     await env.KV.put(hashKey, userId, { expirationTtl: 60 * 60 * 24 * 180 });
   }
   return { status: approved ? 'approved' : 'rejected', reason, hash };
+}
+
+function applyDobroApproval(st, userId, deedId, reason) {
+  const user = st.users[userId];
+  if (!user || !Array.isArray(user.deeds)) return { ok: false, error: 'deed' };
+  const idx = user.deeds.findIndex((d) => d.id === deedId);
+  if (idx < 0) return { ok: false, error: 'deed' };
+  const cur = user.deeds[idx];
+  if (cur.status === 'approved' && (cur.points || 0) > 0) {
+    return { ok: true, already: true, deed: cur };
+  }
+  const cat = DOBRO_CATS[cur.category];
+  const points = cur.awardPoints || (cat && cat.points) || 0;
+  cur.status = 'approved';
+  cur.reason = reason || 'Фото принято';
+  cur.points = points;
+  user.points = (user.points || 0) + points;
+  user.deedCount = (user.deedCount || 0) + 1;
+  if (cur.photo && !st.feed.some((f) => f.id === cur.id)) {
+    st.feed.unshift({
+      id: cur.id,
+      title: cur.title,
+      category: cur.category,
+      points: cur.points,
+      createdAt: cur.createdAt,
+      photo: cur.photo,
+      authorName: user.name || 'Участник',
+      authorId: userId,
+      status: 'approved',
+      reason: cur.reason
+    });
+  }
+  return { ok: true, deed: cur };
 }
 
 function emptyDobro() {
@@ -759,7 +879,6 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     await putDobro(env.KV, state);
 
     const userId = body.id;
-    const authorName = rec.name || 'Участник';
     const runVerify = async () => {
       const result = await verifyDobroPhoto(env, {
         title: title.title,
@@ -774,25 +893,11 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       const idx = user.deeds.findIndex((d) => d.id === deedId);
       if (idx < 0) return;
       const cur = user.deeds[idx];
-      cur.status = result.status;
-      cur.reason = result.reason;
       if (result.status === 'approved') {
-        cur.points = cur.awardPoints || cat.points;
-        user.points = (user.points || 0) + cur.points;
-        user.deedCount = (user.deedCount || 0) + 1;
-        st.feed.unshift({
-          id: cur.id,
-          title: cur.title,
-          category: cur.category,
-          points: cur.points,
-          createdAt: cur.createdAt,
-          photo: cur.photo,
-          authorName,
-          authorId: userId,
-          status: 'approved',
-          reason: result.reason
-        });
+        applyDobroApproval(st, userId, deedId, result.reason);
       } else {
+        cur.status = 'rejected';
+        cur.reason = result.reason;
         cur.points = 0;
       }
       pruneDobroPhotos(st);
@@ -815,6 +920,74 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         reason: deed.reason
       }
     }, 201, origin);
+  }
+  // Recover deeds rejected only because AI check failed (infra/license), or status=error
+  if (request.method === 'POST' && path === '/dobro/deed/recover') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const deedId = Number(body.deedId);
+    if (!Number.isFinite(deedId)) return json({ ok: false, error: 'deed' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const user = state.users[body.id];
+    if (!user || !Array.isArray(user.deeds)) return json({ ok: false, error: 'deed' }, 404, origin);
+    const cur = user.deeds.find((d) => d.id === deedId);
+    if (!cur) return json({ ok: false, error: 'deed' }, 404, origin);
+    const recoverable = cur.status === 'error'
+      || (cur.status === 'rejected' && dobroIsVerifyInfraFail(cur.reason));
+    if (!recoverable) {
+      return json({
+        ok: false,
+        error: 'not_recoverable',
+        errorText: 'Это дело отклонено по содержанию — его нельзя принять автоматически'
+      }, 400, origin);
+    }
+    // Prefer re-check when photo still present; on AI fail → still approve
+    if (cur.photo) {
+      const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(cur.photo);
+      const b64 = m ? m[1].replace(/\s+/g, '') : '';
+      if (b64) {
+        const cat = DOBRO_CATS[cur.category] || { label: cur.category || '' };
+        const result = await verifyDobroPhoto(env, {
+          title: cur.title || '',
+          categoryLabel: cat.label || '',
+          photo: cur.photo,
+          base64: b64,
+          userId: body.id
+        });
+        if (result.status === 'rejected' && !result.failOpen) {
+          cur.status = 'rejected';
+          cur.reason = result.reason;
+          cur.points = 0;
+          await putDobro(env.KV, state);
+          return json({
+            ok: false,
+            error: 'rejected',
+            errorText: result.reason || 'Фото отклонено'
+          }, 403, origin);
+        }
+        applyDobroApproval(state, body.id, deedId, result.reason || 'Фото принято');
+      } else {
+        applyDobroApproval(state, body.id, deedId, 'Принято после сбоя проверки');
+      }
+    } else {
+      applyDobroApproval(state, body.id, deedId, 'Принято после сбоя проверки');
+    }
+    pruneDobroPhotos(state);
+    await putDobro(env.KV, state);
+    const done = state.users[body.id].deeds.find((d) => d.id === deedId);
+    return json({
+      ok: true,
+      deed: {
+        id: done.id,
+        title: done.title,
+        category: done.category,
+        points: done.points || 0,
+        createdAt: done.createdAt,
+        photoUrl: done.photo || null,
+        status: done.status,
+        reason: done.reason || ''
+      }
+    }, 200, origin);
   }
   return json({ ok: false, error: 'not_found' }, 404, origin);
 }
