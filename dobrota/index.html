@@ -25,15 +25,51 @@
     <div class="box">
       <p class="brand">Доброта</p>
       <h1 class="lead">Делай доброе дело — сфотографируй — поднимайся в рейтинге</h1>
-      <p class="sub">Как вас зовут? Это имя будет в общем рейтинге. Его можно будет сменить позже.</p>
-      <form id="gate-form" class="nick-form gate-form">
-        <label>
-          <span>Ваше имя</span>
-          <input type="text" id="gate-name" maxlength="40" required placeholder="Например, Мария" autocomplete="nickname">
-        </label>
-        <button class="btn" type="submit">Начать</button>
-        <p id="gate-err" class="msg err hidden"></p>
-      </form>
+      <p class="sub" id="gate-sub">Создайте аккаунт: имя в рейтинге и PIN из 4 цифр. На этом устройстве вход сохранится.</p>
+
+      <div id="gate-mode-register" class="gate-mode">
+        <form id="gate-form" class="nick-form gate-form">
+          <label>
+            <span>Ваше имя</span>
+            <input type="text" id="gate-name" maxlength="40" required placeholder="Например, Мария" autocomplete="nickname">
+          </label>
+          <label>
+            <span>PIN (4 цифры)</span>
+            <input type="password" id="gate-pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
+          </label>
+          <label>
+            <span>Повторите PIN</span>
+            <input type="password" id="gate-pin2" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
+          </label>
+          <button class="btn" type="submit" id="gate-submit">Создать аккаунт</button>
+          <p id="gate-err" class="msg err hidden"></p>
+        </form>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-have-account">У меня уже есть аккаунт — войти</button>
+      </div>
+
+      <div id="gate-mode-login" class="gate-mode hidden">
+        <form id="login-form" class="nick-form gate-form">
+          <label>
+            <span>Имя аккаунта</span>
+            <input type="text" id="login-name" maxlength="40" required placeholder="Как при регистрации" autocomplete="username">
+          </label>
+          <label>
+            <span>PIN</span>
+            <input type="password" id="login-pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="current-password">
+          </label>
+          <button class="btn" type="submit" id="login-submit">Войти</button>
+          <p id="login-err" class="msg err hidden"></p>
+        </form>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-new-account">Создать новый аккаунт</button>
+      </div>
+
+      <div id="gate-mode-sync" class="gate-mode hidden">
+        <p class="sync-restore-title">Восстановление по ссылке</p>
+        <p class="sub tight" id="sync-restore-hint">Открыта личная ссылка входа. Подтвердите, чтобы войти в существующий аккаунт.</p>
+        <button class="btn" type="button" id="sync-claim-btn">Войти в аккаунт</button>
+        <p id="sync-err" class="msg err hidden"></p>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-sync-other">Войти по имени и PIN</button>
+      </div>
     </div>
   </div>
 
@@ -106,7 +142,7 @@
       <section id="panel-profile" class="panel" data-title="Профиль" hidden>
         <p class="kicker">Профиль</p>
         <h2>Ваше имя в рейтинге</h2>
-        <p class="hint">Имя видно всем участникам. Его можно сменить в любой момент.</p>
+        <p class="hint">Имя видно всем участникам. Дубликаты имён не допускаются.</p>
         <form id="nick-form" class="nick-form">
           <label>
             <span>Имя в рейтинге</span>
@@ -115,6 +151,34 @@
           <button class="btn btn-ghost" type="submit">Сохранить имя</button>
         </form>
         <p class="profile-note muted" id="profile-note"></p>
+
+        <div class="profile-block" id="pin-block">
+          <h3 class="profile-h3">PIN для входа</h3>
+          <p class="hint tight" id="pin-hint">PIN нужен, чтобы войти с другого телефона или браузера по имени.</p>
+          <form id="pin-form" class="nick-form gate-form">
+            <label id="pin-old-wrap" class="hidden">
+              <span>Текущий PIN</span>
+              <input type="password" id="pin-old" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="••••" autocomplete="current-password">
+            </label>
+            <label>
+              <span id="pin-new-label">Новый PIN (4 цифры)</span>
+              <input type="password" id="pin-new" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
+            </label>
+            <button class="btn btn-ghost" type="submit" id="pin-submit">Сохранить PIN</button>
+          </form>
+        </div>
+
+        <div class="profile-block syncbox">
+          <h3 class="profile-h3">Вход на другом устройстве</h3>
+          <p class="hint tight">Создайте личную ссылку и откройте её на другом телефоне или в другом браузере — войдёте в этот же аккаунт.</p>
+          <div class="synclink">
+            <input id="sync-url" readonly value="" placeholder="Сначала создайте ссылку" aria-label="Ссылка для входа">
+            <button type="button" class="btn btn-ghost" id="sync-copy">Копировать</button>
+          </div>
+          <p class="syncwarn">Не отправляйте ссылку другим — это ваш аккаунт.</p>
+          <button type="button" class="btn" id="sync-make">Создать ссылку</button>
+        </div>
+
         <button type="button" class="btn btn-ghost rules-profile-btn" id="btn-rules-profile">Правила проверки фото</button>
       </section>
 
