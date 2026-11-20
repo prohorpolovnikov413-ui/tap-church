@@ -535,6 +535,33 @@ async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, user
   return { status: approved ? 'approved' : 'rejected', reason, hash };
 }
 
+function dobroPhotoKey(deedId) {
+  return 'dobro:photo:' + String(deedId);
+}
+
+function deedHasPhoto(d) {
+  return !!(d && (d.hasPhoto || d.photo));
+}
+
+async function putDobroPhotoBlob(kv, deedId, dataUrl) {
+  if (!dataUrl) return false;
+  // Separate KV value keeps dobro:v1 small; TTL ~180d matches photo hash policy
+  await kv.put(dobroPhotoKey(deedId), dataUrl, { expirationTtl: 60 * 60 * 24 * 180 });
+  return true;
+}
+
+async function getDobroPhotoBlob(kv, deedId) {
+  try {
+    return (await kv.get(dobroPhotoKey(deedId))) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteDobroPhotoBlob(kv, deedId) {
+  try { await kv.delete(dobroPhotoKey(deedId)); } catch {}
+}
+
 function applyDobroApproval(st, userId, deedId, reason) {
   const user = st.users[userId];
   if (!user || !Array.isArray(user.deeds)) return { ok: false, error: 'deed' };
@@ -542,6 +569,21 @@ function applyDobroApproval(st, userId, deedId, reason) {
   if (idx < 0) return { ok: false, error: 'deed' };
   const cur = user.deeds[idx];
   if (cur.status === 'approved' && (cur.points || 0) > 0) {
+    // Still ensure feed entry if photo exists but was missing from feed
+    if (deedHasPhoto(cur) && !st.feed.some((f) => f.id === cur.id)) {
+      st.feed.unshift({
+        id: cur.id,
+        title: cur.title,
+        category: cur.category,
+        points: cur.points,
+        createdAt: cur.createdAt,
+        hasPhoto: true,
+        authorName: user.name || 'Участник',
+        authorId: userId,
+        status: 'approved',
+        reason: cur.reason || reason || ''
+      });
+    }
     return { ok: true, already: true, deed: cur };
   }
   const cat = DOBRO_CATS[cur.category];
@@ -549,16 +591,21 @@ function applyDobroApproval(st, userId, deedId, reason) {
   cur.status = 'approved';
   cur.reason = reason || 'Фото принято';
   cur.points = points;
+  // Do not keep bulky base64 on the deed — photo lives in dobro:photo:{id}
+  if (cur.photo) {
+    cur.hasPhoto = true;
+    delete cur.photo;
+  }
   user.points = (user.points || 0) + points;
   user.deedCount = (user.deedCount || 0) + 1;
-  if (cur.photo && !st.feed.some((f) => f.id === cur.id)) {
+  if (deedHasPhoto(cur) && !st.feed.some((f) => f.id === cur.id)) {
     st.feed.unshift({
       id: cur.id,
       title: cur.title,
       category: cur.category,
       points: cur.points,
       createdAt: cur.createdAt,
-      photo: cur.photo,
+      hasPhoto: true,
       authorName: user.name || 'Участник',
       authorId: userId,
       status: 'approved',
@@ -585,20 +632,95 @@ async function putDobro(kv, state) {
   await kv.put(DOBRO_KEY, JSON.stringify(state));
 }
 
-function pruneDobroPhotos(state) {
-  if (state.feed.length > DOBRO_FEED_MAX) state.feed = state.feed.slice(0, DOBRO_FEED_MAX);
-  const keep = new Set();
-  for (const item of state.feed) if (item.photo) keep.add(item.id);
+async function pruneDobroPhotos(kv, state) {
+  const dropped = [];
+  if (state.feed.length > DOBRO_FEED_MAX) {
+    dropped.push(...state.feed.slice(DOBRO_FEED_MAX));
+    state.feed = state.feed.slice(0, DOBRO_FEED_MAX);
+  }
+  // Normalize feed: photos live in dobro:photo:{id}, not inside dobro:v1
+  for (const item of state.feed) {
+    if (item.photo && kv) {
+      await putDobroPhotoBlob(kv, item.id, item.photo);
+      item.hasPhoto = true;
+      delete item.photo;
+    } else if (item.photo) {
+      item.hasPhoto = true;
+      delete item.photo;
+    }
+  }
   for (const u of Object.values(state.users)) {
     if (!Array.isArray(u.deeds)) u.deeds = [];
     if (u.deeds.length > DOBRO_HIST_MAX) u.deeds = u.deeds.slice(0, DOBRO_HIST_MAX);
     for (const d of u.deeds) {
-      if (d.photo && !keep.has(d.id)) delete d.photo;
+      if (!d.photo) continue;
+      // Move any leftover inline base64 into KV; never drop pending/error before publish
+      if (kv) await putDobroPhotoBlob(kv, d.id, d.photo);
+      d.hasPhoto = true;
+      delete d.photo;
+    }
+  }
+  if (kv) {
+    for (const item of dropped) {
+      if (item && item.id != null) await deleteDobroPhotoBlob(kv, item.id);
     }
   }
 }
 
-function publicDobro(state, id) {
+/** Re-attach approved deeds with photos that never made it into feed (prune bug). */
+async function repairDobroFeed(kv, state) {
+  let changed = false;
+  const inFeed = new Set(state.feed.map((f) => f.id));
+  for (const [uid, user] of Object.entries(state.users || {})) {
+    if (!user || !Array.isArray(user.deeds)) continue;
+    for (const d of user.deeds) {
+      if ((d.status || 'approved') !== 'approved') continue;
+      if (inFeed.has(d.id)) continue;
+      let photo = d.photo || null;
+      if (!photo) photo = await getDobroPhotoBlob(kv, d.id);
+      if (!photo && !d.hasPhoto) continue;
+      if (photo) {
+        await putDobroPhotoBlob(kv, d.id, photo);
+        d.hasPhoto = true;
+        delete d.photo;
+      } else if (!d.hasPhoto) {
+        continue;
+      }
+      state.feed.unshift({
+        id: d.id,
+        title: d.title,
+        category: d.category,
+        points: d.points || 0,
+        createdAt: d.createdAt,
+        hasPhoto: true,
+        authorName: user.name || 'Участник',
+        authorId: uid,
+        status: 'approved',
+        reason: d.reason || ''
+      });
+      inFeed.add(d.id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    state.feed.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    await pruneDobroPhotos(kv, state);
+  }
+  return changed;
+}
+
+async function resolveDeedPhotoUrl(kv, deedOrFeedItem) {
+  if (!deedOrFeedItem) return null;
+  if (deedOrFeedItem.photo) return deedOrFeedItem.photo;
+  if (deedOrFeedItem.photoUrl) return deedOrFeedItem.photoUrl;
+  if (deedOrFeedItem.hasPhoto || deedOrFeedItem.id != null) {
+    const blob = await getDobroPhotoBlob(kv, deedOrFeedItem.id);
+    if (blob) return blob;
+  }
+  return null;
+}
+
+async function publicDobro(state, id, kv) {
   const u = (id && state.users[id]) || null;
   const board = Object.entries(state.users)
     .filter(([, rec]) => (rec.deedCount || 0) > 0)
@@ -617,28 +739,43 @@ function publicDobro(state, id) {
       deedCount: e.deedCount,
       isYou: e.id === id
     }));
-  const feed = state.feed.filter((item) => item.photo && (item.status || 'approved') === 'approved').slice(0, DOBRO_FEED_MAX).map((item) => ({
-    id: item.id,
-    title: item.title,
-    category: item.category,
-    points: item.points,
-    createdAt: item.createdAt,
-    photoUrl: item.photo,
-    authorName: item.authorName,
-    isYou: item.authorId === id,
-    status: item.status || 'approved',
-    reason: item.reason || ''
-  }));
-  const deeds = u && Array.isArray(u.deeds) ? u.deeds.map((d) => ({
-    id: d.id,
-    title: d.title,
-    category: d.category,
-    points: d.status === 'approved' || !d.status ? (d.points || 0) : 0,
-    createdAt: d.createdAt,
-    photoUrl: d.photo || null,
-    status: d.status || 'approved',
-    reason: d.reason || ''
-  })) : [];
+  // Approved feed items with a photo (inline legacy or KV blob)
+  const feedSrc = state.feed
+    .filter((item) => (item.status || 'approved') === 'approved')
+    .slice(0, DOBRO_FEED_MAX);
+  const feed = [];
+  for (const item of feedSrc) {
+    const photoUrl = await resolveDeedPhotoUrl(kv, item);
+    if (!photoUrl) continue; // лента только с фото
+    feed.push({
+      id: item.id,
+      title: item.title,
+      category: item.category,
+      points: item.points,
+      createdAt: item.createdAt,
+      photoUrl,
+      authorName: item.authorName,
+      isYou: item.authorId === id,
+      status: item.status || 'approved',
+      reason: item.reason || ''
+    });
+  }
+  const deeds = [];
+  if (u && Array.isArray(u.deeds)) {
+    for (const d of u.deeds) {
+      deeds.push({
+        id: d.id,
+        title: d.title,
+        category: d.category,
+        points: d.status === 'approved' || !d.status ? (d.points || 0) : 0,
+        createdAt: d.createdAt,
+        photoUrl: await resolveDeedPhotoUrl(kv, d),
+        status: d.status || 'approved',
+        reason: d.reason || '',
+        canRecover: d.status === 'error' || (d.status === 'rejected' && dobroIsVerifyInfraFail(d.reason))
+      });
+    }
+  }
   return {
     ok: true,
     me: {
@@ -688,7 +825,9 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     const id = url.searchParams.get('id') || '';
     if (id && !validId(id)) return json({ ok: false, error: 'id' }, 400, origin);
     const state = await getDobro(env.KV);
-    const payload = publicDobro(state, id || '');
+    const repaired = await repairDobroFeed(env.KV, state);
+    if (repaired) await putDobro(env.KV, state);
+    const payload = await publicDobro(state, id || '', env.KV);
     if (id && state.users[id]) {
       payload.me.hasPin = !!state.users[id].pinHash;
       payload.me.exists = true;
@@ -862,6 +1001,8 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       return json({ ok: false, error: 'rate' }, 429, origin);
     }
     const deedId = state.seq++;
+    // Store compressed photo in its own KV key (keeps dobro:v1 under size limits)
+    await putDobroPhotoBlob(env.KV, deedId, pic.photo);
     const deed = {
       id: deedId,
       title: title.title,
@@ -869,13 +1010,13 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       points: 0,
       awardPoints: cat.points,
       createdAt: new Date(now).toISOString(),
-      photo: pic.photo,
+      hasPhoto: true,
       status: 'pending',
       reason: 'Проверяем фото…'
     };
     rec.deeds.unshift(deed);
     rec.lastAt = now;
-    pruneDobroPhotos(state);
+    await pruneDobroPhotos(env.KV, state);
     await putDobro(env.KV, state);
 
     const userId = body.id;
@@ -893,6 +1034,8 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       const idx = user.deeds.findIndex((d) => d.id === deedId);
       if (idx < 0) return;
       const cur = user.deeds[idx];
+      // Ensure photo blob still present for feed/history
+      cur.hasPhoto = true;
       if (result.status === 'approved') {
         applyDobroApproval(st, userId, deedId, result.reason);
       } else {
@@ -900,7 +1043,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         cur.reason = result.reason;
         cur.points = 0;
       }
-      pruneDobroPhotos(st);
+      await pruneDobroPhotos(env.KV, st);
       await putDobro(env.KV, st);
     };
 
@@ -915,7 +1058,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         category: deed.category,
         points: 0,
         createdAt: deed.createdAt,
-        photoUrl: deed.photo || null,
+        photoUrl: pic.photo || null,
         status: 'pending',
         reason: deed.reason
       }
@@ -941,16 +1084,19 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         errorText: 'Это дело отклонено по содержанию — его нельзя принять автоматически'
       }, 400, origin);
     }
-    // Prefer re-check when photo still present; on AI fail → still approve
-    if (cur.photo) {
-      const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(cur.photo);
+    // Prefer re-check when photo still present (inline or KV); on AI fail → still approve
+    let photoData = cur.photo || null;
+    if (!photoData) photoData = await getDobroPhotoBlob(env.KV, deedId);
+    if (photoData) {
+      cur.hasPhoto = true;
+      const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(photoData);
       const b64 = m ? m[1].replace(/\s+/g, '') : '';
       if (b64) {
         const cat = DOBRO_CATS[cur.category] || { label: cur.category || '' };
         const result = await verifyDobroPhoto(env, {
           title: cur.title || '',
           categoryLabel: cat.label || '',
-          photo: cur.photo,
+          photo: photoData,
           base64: b64,
           userId: body.id
         });
@@ -965,14 +1111,17 @@ async function handleDobro(request, env, ctx, url, path, origin) {
             errorText: result.reason || 'Фото отклонено'
           }, 403, origin);
         }
+        // Ensure blob exists for feed after approval
+        await putDobroPhotoBlob(env.KV, deedId, photoData);
         applyDobroApproval(state, body.id, deedId, result.reason || 'Фото принято');
       } else {
+        cur.hasPhoto = true;
         applyDobroApproval(state, body.id, deedId, 'Принято после сбоя проверки');
       }
     } else {
       applyDobroApproval(state, body.id, deedId, 'Принято после сбоя проверки');
     }
-    pruneDobroPhotos(state);
+    await pruneDobroPhotos(env.KV, state);
     await putDobro(env.KV, state);
     const done = state.users[body.id].deeds.find((d) => d.id === deedId);
     return json({
@@ -983,7 +1132,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         category: done.category,
         points: done.points || 0,
         createdAt: done.createdAt,
-        photoUrl: done.photo || null,
+        photoUrl: await resolveDeedPhotoUrl(env.KV, done),
         status: done.status,
         reason: done.reason || ''
       }
