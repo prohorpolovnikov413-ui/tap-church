@@ -4,6 +4,7 @@
   const COOKIE = 'dobrota_uid';
   const IDB_NAME = 'dobrota-db';
   const IDB_STORE = 'session';
+  const RULES_SEEN = 'dobrota-rules-seen-v1';
   const CATS = [
     { id: 'smile', label: 'Маленькая радость', hint: 'улыбка, комплимент, тёплое слово', points: 5 },
     { id: 'help', label: 'Практическая помощь', hint: 'помог с сумками, делом, дорогой', points: 15 },
@@ -15,7 +16,7 @@
 
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), app = $('app');
-  let user = null, photo = null, category = 'help', busy = false;
+  let user = null, photo = null, category = 'help', busy = false, prevTab = 'feed';
   let hasPin = false, pendingSync = '';
 
   function randId() {
@@ -214,7 +215,42 @@
   }
   function updateAddLabel() {
     const c = CATS.find((x) => x.id === category);
-    $('btn-add').textContent = busy ? 'Сохраняем…' : `Добавить · +${c.points}`;
+    $('btn-add').textContent = busy ? 'Проверяем…' : `Добавить · +${c.points}`;
+  }
+
+  function statusBadge(status, reason) {
+    const s = status || 'approved';
+    if (s === 'pending') {
+      return `<span class="badge badge-pending">проверяется…</span>`;
+    }
+    if (s === 'rejected') {
+      return `<span class="badge badge-bad">❌ отклонено</span>${reason ? `<span class="reason">${esc(reason)}</span>` : ''}`;
+    }
+    return `<span class="badge badge-ok">✅ принято</span>`;
+  }
+
+  let pollTimer = null;
+  function stopPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function startPollIfPending(data) {
+    stopPoll();
+    const pending = (data.deeds || []).some((d) => d.status === 'pending');
+    if (!pending) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const next = await api('/dobro/state?id=' + encodeURIComponent(user.id));
+        renderState(next);
+        if (!(next.deeds || []).some((d) => d.status === 'pending')) stopPoll();
+      } catch {}
+    }, 2000);
+  }
+
+  function rulesSeen() {
+    try { return localStorage.getItem(RULES_SEEN) === '1'; } catch { return false; }
+  }
+  function markRulesSeen() {
+    try { localStorage.setItem(RULES_SEEN, '1'); } catch {}
   }
 
   function setTab(name) {
@@ -223,8 +259,10 @@
       feed: 'Лента',
       board: 'Рейтинг',
       history: 'История',
-      profile: 'Профиль'
+      profile: 'Профиль',
+      rules: 'Правила'
     };
+    if (name !== 'rules') prevTab = name;
     document.querySelectorAll('.panel').forEach((p) => {
       const on = p.id === 'panel-' + name;
       p.classList.toggle('active', on);
@@ -232,12 +270,23 @@
       else p.setAttribute('hidden', '');
     });
     document.querySelectorAll('.tab').forEach((t) => {
-      t.classList.toggle('on', t.getAttribute('data-tab') === name);
+      const tab = t.getAttribute('data-tab');
+      t.classList.toggle('on', name === 'rules' ? tab === prevTab : tab === name);
     });
     const title = $('app-title');
     if (title) title.textContent = titles[name] || 'Доброта';
     const main = $('app-main');
     if (main) main.scrollTop = 0;
+    if (name === 'add' && !rulesSeen()) openRules(true);
+  }
+
+  function openRules(fromFirstDeed) {
+    if (fromFirstDeed) markRulesSeen();
+    setTab('rules');
+  }
+  function closeRules() {
+    markRulesSeen();
+    setTab(prevTab === 'rules' ? 'add' : prevTab || 'add');
   }
 
   function updatePinUi() {
@@ -269,12 +318,12 @@
     if (note) note.textContent = `${me.totalPoints} баллов · ${me.deedCount} ${deedsWord(me.deedCount)}`;
 
     const feed = data.feed || [];
-      $('feed-list').innerHTML = feed.length ? `<div class="feed">${feed.map((item) => `
+    $('feed-list').innerHTML = feed.length ? `<div class="feed">${feed.map((item) => `
       <article class="card">
         <img src="${esc(item.photoUrl)}" alt="">
         <p class="t">${esc(item.title)}</p>
         <p class="m">${esc(item.authorName)}${item.isYou ? ' · это вы' : ''} · ${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
-      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет дел с фото — добавьте запись со снимком, и она появится здесь.</p>';
+      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет дел с фото — добавьте запись со снимком.</p>';
 
     const board = data.board || [];
     $('board-list').innerHTML = board.length ? board.map((e) => `
@@ -286,18 +335,17 @@
       </li>`).join('') : '<li class="muted">Пока пусто — будьте первым, кто отметит доброе дело.</li>';
 
     const deeds = data.deeds || [];
-    $('hist-list').innerHTML = deeds.length ? deeds.map((d) => {
-      const approved = !d.status || d.status === 'approved';
-      return `
-      <li class="deed-item">
+    $('hist-list').innerHTML = deeds.length ? deeds.map((d) => `
+      <li class="deed-item status-${esc(d.status || 'approved')}">
         ${d.photoUrl ? `<img class="thumb" src="${esc(d.photoUrl)}" alt="">` : ''}
         <div class="grow">
           <p>${esc(d.title)}</p>
           <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p>
+          <div class="status-row">${statusBadge(d.status, d.reason)}</div>
         </div>
-        <span class="pts-sm">${approved ? '+' + (d.points || 0) : '—'}</span>
-      </li>`;
-    }).join('') : '<li class="muted">Записей ещё нет — добавьте первое доброе дело.</li>';
+        <span class="pts-sm">${d.status === 'rejected' || d.status === 'pending' ? '—' : '+' + (d.points || 0)}</span>
+      </li>`).join('') : '<li class="muted">Записей ещё нет — добавьте первое дело с фото.</li>';
+    startPollIfPending(data);
   }
 
   async function loadAll() {
@@ -504,6 +552,10 @@
   $('deed-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (busy) return;
+    if (!photo) {
+      show($('error'), 'Добавьте фото доброго дела — без него запись не принимается', true);
+      return;
+    }
     busy = true;
     updateAddLabel();
     show($('error'), '', false);
@@ -517,13 +569,19 @@
           name: user.name,
           title: $('title').value,
           category,
-          photo: photo || null
+          photo
         })
       });
       $('title').value = '';
       clearPhoto();
-      const pts = (data.deed && data.deed.points) || 0;
-      show($('flash'), `Записано · +${pts} баллов`, true, 'ok');
+      const st = data.deed && data.deed.status;
+      if (st === 'pending' || !st) {
+        show($('flash'), 'Отправлено · фото проверяется…', true, 'ok');
+      } else if (st === 'approved') {
+        show($('flash'), `✅ Принято · +${data.deed.points} баллов`, true, 'ok');
+      } else {
+        show($('flash'), `❌ Отклонено: ${(data.deed && data.deed.reason) || 'фото не подошло'}`, true, 'err');
+      }
       setTab('history');
       await loadAll();
     } catch (e) {
@@ -632,6 +690,12 @@
   document.querySelectorAll('.tab').forEach((btn) => {
     btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab')));
   });
+  const btnRulesAdd = $('btn-rules-add');
+  const btnRulesProfile = $('btn-rules-profile');
+  const btnRulesDone = $('btn-rules-done');
+  if (btnRulesAdd) btnRulesAdd.addEventListener('click', () => openRules(false));
+  if (btnRulesProfile) btnRulesProfile.addEventListener('click', () => openRules(false));
+  if (btnRulesDone) btnRulesDone.addEventListener('click', closeRules);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
@@ -640,7 +704,7 @@
   async function boot() {
     const params = new URLSearchParams(location.search);
     const bootTab = params.get('tab');
-    const okTab = ['add', 'feed', 'board', 'history', 'profile'].includes(bootTab) ? bootTab : 'feed';
+    const okTab = ['add', 'feed', 'board', 'history', 'profile', 'rules'].includes(bootTab) ? bootTab : 'feed';
     const syncToken = (params.get('sync') || '').trim();
 
     user = await loadUserDurable();

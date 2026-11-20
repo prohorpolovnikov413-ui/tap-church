@@ -1,21 +1,23 @@
 # Доброта — Worker (`/dobro/*`)
 
-Актуальная реализация маршрутов — в `server/worker.js` (`handleDobro`).
-Модули `verify.js` / `dobro-handler.js` — устаревший справочник (ИИ-проверка фото отключена).
+Актуальная реализация — в `server/worker.js` (`handleDobro`).
+Модули `verify.js` / `dobro-handler.js` — справочные; деплойте `server/worker.js`.
+
+## ИИ-проверка фото (мягкая)
+
+`POST /dobro/deed` вызывает Workers AI vision с мягким промптом:
+- по умолчанию принимает обычные фото добрых дел;
+- отклоняет только: 18+/эротика, курение/вейп, алкоголь, наркотики, насилие/кровь/оружие, неприличные жесты;
+- при неясном ответе модели — одобрение.
 
 ## Auth / сессия
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
-| POST | `/dobro/register` | `{id?, name, pin}` — создать аккаунт, PIN (4 цифры), уникальный ник |
-| POST | `/dobro/login` | `{name, pin}` — войти в существующий |
-| POST | `/dobro/set-pin` | `{id, pin, oldPin?}` — задать/сменить PIN |
-| POST | `/dobro/sync/issue` | `{id}` — личная ссылка `?sync=` (TTL ~30 дней) |
-| GET | `/dobro/sync/info` | `?token=` — превью имени по ссылке |
-| POST | `/dobro/sync/claim` | `{token}` — получить `id` аккаунта |
-| GET | `/dobro/state` | `me.hasPin`, `me.exists` |
-| POST | `/dobro/nick` | отказ при занятом имени (`nick_taken`) |
-| POST | `/dobro/deed` | дело сразу `approved`; фото **опционально**; **без** Workers AI |
+| POST | `/dobro/register` | создать аккаунт + PIN |
+| POST | `/dobro/login` | вход по имени + PIN |
+| POST | `/dobro/set-pin` | задать/сменить PIN |
+| POST | `/dobro/sync/*` | личная ссылка `?sync=` |
 
 ## Деплой (вручную)
 
@@ -24,4 +26,4 @@ cd server
 npx wrangler deploy
 ```
 
-После отключения ИИ-проверки задеплойте Worker, иначе прод продолжит гонять vision на `/dobro/deed`.
+**PR не деплоит Worker** — задеплойте сами после мержа.

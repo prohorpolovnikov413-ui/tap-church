@@ -91,15 +91,16 @@
       <section id="panel-add" class="panel" data-title="Новое дело" hidden>
         <p class="kicker">Новая запись</p>
         <h2>Что хорошего вы сделали?</h2>
-        <p class="hint">Опишите дело, выберите категорию — фото можно добавить по желанию.</p>
+        <p class="hint">Опишите дело, выберите категорию и приложите фото — проверка мягкая, без лишней строгости.</p>
         <form id="deed-form">
           <label class="block-label">
             <span>Описание</span>
             <textarea id="title" maxlength="160" required placeholder="Например: помог соседке донести сумки до двери"></textarea>
           </label>
           <div>
-            <p class="lbl">Фото (по желанию)</p>
-            <p class="hint tight">Снимок появится в общей ленте. Без фото дело всё равно попадёт в историю и рейтинг.</p>
+            <p class="lbl">Фото доброго дела</p>
+            <p class="hint tight">ИИ только отсекает недопустимый контент. Обычные кадры добрых дел проходят.</p>
+            <button type="button" class="rules-link" id="btn-rules-add">ℹ Правила проверки фото</button>
             <div class="photo-actions">
               <button type="button" class="btn btn-ghost" id="btn-camera">Сфотографировать</button>
               <button type="button" class="btn btn-ghost" id="btn-gallery">Из галереи</button>
@@ -120,7 +121,7 @@
       <section id="panel-feed" class="panel active" data-title="Лента">
         <p class="kicker">Лента</p>
         <h2>Добрые дела в кадре</h2>
-        <p class="hint">Последние добрые дела с фото от всех участников.</p>
+        <p class="hint">Последние записи с фото от всех участников.</p>
         <div id="feed-list"></div>
       </section>
 
@@ -178,6 +179,82 @@
           <button type="button" class="btn" id="sync-make">Создать ссылку</button>
         </div>
 
+        <button type="button" class="btn btn-ghost rules-profile-btn" id="btn-rules-profile">Правила проверки фото</button>
+      </section>
+
+      <section id="panel-rules" class="panel panel-rules" data-title="Правила" hidden>
+        <div class="rules-hero">
+          <div class="rules-hero-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 14v2m0 6v12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+          </div>
+          <p class="kicker">Мягкая проверка</p>
+          <h2>Правила проверки фото</h2>
+          <p class="hint">ИИ не требует «доказательств» доброго дела. Он только отсекает то, чего нельзя показывать в ленте.</p>
+        </div>
+
+        <article class="rules-card rules-card-accent">
+          <h3>Как это работает</h3>
+          <p>Обычные кадры добрых дел <strong>принимаются</strong>. Отклонение — только при недопустимом содержимом; причина будет короткой и понятной.</p>
+          <div class="rules-result-row">
+            <div class="rules-pill ok"><span>✅</span><div><strong>Принято</strong><small>баллы начисляются</small></div></div>
+            <div class="rules-pill bad"><span>❌</span><div><strong>Отклонено</strong><small>понятная причина</small></div></div>
+          </div>
+        </article>
+
+        <h3 class="rules-section-title">Так можно</h3>
+        <div class="rules-grid">
+          <div class="rules-ex good">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 28v-8h4v8h8v-12h4L20 6 8 16h4v12z" fill="currentColor"/></svg></div>
+            <strong>Любой обычный кадр</strong>
+            <span>помощь, вещи, место, руки, улыбка</span>
+          </div>
+          <div class="rules-ex good">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 20l3 3 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+            <strong>Без строгости</strong>
+            <span>не нужно доказывать дело «как в суде»</span>
+          </div>
+          <div class="rules-ex good">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M8 28c4-10 20-10 24 0" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="14" cy="14" r="3" fill="currentColor"/><circle cx="26" cy="12" r="2.5" fill="currentColor"/></svg></div>
+            <strong>Неидеально — ок</strong>
+            <span>размыто, темно, не весь кадр — можно</span>
+          </div>
+        </div>
+
+        <h3 class="rules-section-title">Так нельзя</h3>
+        <div class="rules-grid">
+          <div class="rules-ex bad">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="12" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14 20h12" stroke="currentColor" stroke-width="2"/></svg></div>
+            <strong>18+ и эротика</strong>
+            <span>обнажёнка, сексуальный контент</span>
+          </div>
+          <div class="rules-ex bad">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 28c2-8 14-8 16 0" fill="none" stroke="currentColor" stroke-width="2"/><rect x="17" y="10" width="6" height="12" rx="2" fill="currentColor"/></svg></div>
+            <strong>Курение и вейп</strong>
+            <span>сигареты, вейпы, табак</span>
+          </div>
+          <div class="rules-ex bad">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M14 28h12v-2a6 6 0 0 0-12 0v2z" fill="currentColor"/><path d="M18 12h4v8h-4z" fill="currentColor"/></svg></div>
+            <strong>Алкоголь и наркотики</strong>
+            <span>бутылки, бокалы, атрибуты употребления</span>
+          </div>
+          <div class="rules-ex bad">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M8 30L32 10M20 8l4 12-10 2z" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+            <strong>Насилие и оружие</strong>
+            <span>кровь, ранения, оружие, жестокость</span>
+          </div>
+          <div class="rules-ex bad">
+            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 26c2-6 14-6 16 0" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="2" fill="currentColor"/><circle cx="24" cy="16" r="2" fill="currentColor"/><path d="M18 22h4" stroke="currentColor" stroke-width="2"/></svg></div>
+            <strong>Неприличные жесты</strong>
+            <span>средний палец и подобное</span>
+          </div>
+        </div>
+
+        <article class="rules-card">
+          <h3>Одно фото — один раз</h3>
+          <p>Одинаковый снимок нельзя отправлять повторно — так лента остаётся свежей.</p>
+        </article>
+
+        <button type="button" class="btn rules-done" id="btn-rules-done">Понятно</button>
       </section>
     </main>
 
