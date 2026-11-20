@@ -323,7 +323,7 @@
         <img src="${esc(item.photoUrl)}" alt="">
         <p class="t">${esc(item.title)}</p>
         <p class="m">${esc(item.authorName)}${item.isYou ? ' · это вы' : ''} · ${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
-      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет подтверждённых фото — добавьте дело с живым снимком.</p>';
+      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет дел с фото — добавьте запись со снимком.</p>';
 
     const board = data.board || [];
     $('board-list').innerHTML = board.length ? board.map((e) => `
