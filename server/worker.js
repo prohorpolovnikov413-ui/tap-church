@@ -521,6 +521,34 @@ function publicDobro(state, id) {
   };
 }
 
+function dobroNameKey(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function findDobroUserByName(state, name) {
+  const key = dobroNameKey(name);
+  if (!key) return null;
+  for (const [id, rec] of Object.entries(state.users || {})) {
+    if (dobroNameKey(rec && rec.name) === key) return { id, rec };
+  }
+  return null;
+}
+
+function cleanDobroPin(raw) {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return { ok: false, error: 'pin' };
+  const s = String(raw).trim();
+  if (!/^\d{4}$/.test(s)) return { ok: false, error: 'pin', errorText: 'PIN — ровно 4 цифры' };
+  return { ok: true, pin: s };
+}
+
+async function hashDobroPin(pin, salt) {
+  return shaHex(String(salt) + ':' + String(pin));
+}
+
+function newDobroSyncToken() {
+  return randToken(24);
+}
+
 async function handleDobro(request, env, ctx, url, path, origin) {
   if (request.method === 'GET' && (path === '/dobro/ping' || path === '/dobro')) {
     return json({ ok: true, app: 'dobrota' }, 200, origin);
@@ -529,7 +557,123 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     const id = url.searchParams.get('id') || '';
     if (id && !validId(id)) return json({ ok: false, error: 'id' }, 400, origin);
     const state = await getDobro(env.KV);
-    return json(publicDobro(state, id || ''), 200, origin);
+    const payload = publicDobro(state, id || '');
+    if (id && state.users[id]) {
+      payload.me.hasPin = !!state.users[id].pinHash;
+      payload.me.exists = true;
+    } else if (id) {
+      payload.me.exists = false;
+      payload.me.hasPin = false;
+    }
+    return json(payload, 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/register') {
+    const body = await request.json().catch(() => null);
+    const nm = cleanDobroName(body && body.name);
+    const pin = cleanDobroPin(body && body.pin);
+    if (!nm.ok) return json({ ok: false, error: 'nick', errorText: 'Имя: 2–40 символов' }, 400, origin);
+    if (!pin.ok) return json({ ok: false, error: 'pin', errorText: pin.errorText || 'PIN — 4 цифры' }, 400, origin);
+    let id = body && body.id;
+    if (id && !validId(id)) return json({ ok: false, error: 'id' }, 400, origin);
+    if (!id) {
+      const a = new Uint8Array(16);
+      crypto.getRandomValues(a);
+      id = Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+    const state = await getDobro(env.KV);
+    const taken = findDobroUserByName(state, nm.name);
+    if (taken && taken.id !== id) {
+      return json({ ok: false, error: 'nick_taken', errorText: 'Такое имя уже занято — войдите в существующий аккаунт' }, 409, origin);
+    }
+    if (taken && taken.id === id && taken.rec.pinHash) {
+      return json({ ok: false, error: 'exists', errorText: 'Аккаунт уже есть — войдите по имени и PIN' }, 409, origin);
+    }
+    const salt = randToken(12);
+    const pinHash = await hashDobroPin(pin.pin, salt);
+    const rec = state.users[id] || { name: nm.name, points: 0, deedCount: 0, deeds: [], lastAt: 0 };
+    rec.name = nm.name;
+    rec.pinSalt = salt;
+    rec.pinHash = pinHash;
+    state.users[id] = rec;
+    await putDobro(env.KV, state);
+    return json({ ok: true, id, name: nm.name, hasPin: true }, 201, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/login') {
+    const body = await request.json().catch(() => null);
+    const nm = cleanDobroName(body && body.name);
+    const pin = cleanDobroPin(body && body.pin);
+    if (!nm.ok) return json({ ok: false, error: 'nick', errorText: 'Введите имя аккаунта' }, 400, origin);
+    if (!pin.ok) return json({ ok: false, error: 'pin', errorText: pin.errorText || 'PIN — 4 цифры' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const found = findDobroUserByName(state, nm.name);
+    if (!found) return json({ ok: false, error: 'auth', errorText: 'Аккаунт с таким именем не найден' }, 404, origin);
+    if (!found.rec.pinHash || !found.rec.pinSalt) {
+      return json({ ok: false, error: 'no_pin', errorText: 'У этого аккаунта ещё нет PIN. Откройте его на старом устройстве и задайте PIN или используйте ссылку входа' }, 403, origin);
+    }
+    const hash = await hashDobroPin(pin.pin, found.rec.pinSalt);
+    if (hash !== found.rec.pinHash) {
+      return json({ ok: false, error: 'auth', errorText: 'Неверное имя или PIN' }, 403, origin);
+    }
+    return json({ ok: true, id: found.id, name: found.rec.name || nm.name, hasPin: true }, 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/set-pin') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const pin = cleanDobroPin(body.pin);
+    if (!pin.ok) return json({ ok: false, error: 'pin', errorText: pin.errorText || 'PIN — 4 цифры' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const rec = state.users[body.id];
+    if (!rec) return json({ ok: false, error: 'auth', errorText: 'Сначала создайте аккаунт' }, 404, origin);
+    if (rec.pinHash) {
+      const old = cleanDobroPin(body.oldPin);
+      if (!old.ok) return json({ ok: false, error: 'pin', errorText: 'Нужен текущий PIN' }, 400, origin);
+      const oldHash = await hashDobroPin(old.pin, rec.pinSalt || '');
+      if (oldHash !== rec.pinHash) return json({ ok: false, error: 'auth', errorText: 'Неверный текущий PIN' }, 403, origin);
+    }
+    const salt = randToken(12);
+    rec.pinSalt = salt;
+    rec.pinHash = await hashDobroPin(pin.pin, salt);
+    state.users[body.id] = rec;
+    await putDobro(env.KV, state);
+    return json({ ok: true, hasPin: true }, 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/sync/issue') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const rec = state.users[body.id];
+    if (!rec) return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    const token = newDobroSyncToken();
+    await env.KV.put('dobro:sync:' + token, JSON.stringify({
+      id: body.id,
+      name: rec.name || 'Участник',
+      at: Date.now()
+    }), { expirationTtl: 60 * 60 * 24 * 30 });
+    return json({ ok: true, token, name: rec.name || 'Участник' }, 200, origin);
+  }
+  if (request.method === 'GET' && path === '/dobro/sync/info') {
+    const token = url.searchParams.get('token') || '';
+    if (!validSecret(token)) return json({ ok: false, error: 'token' }, 400, origin);
+    const raw = await env.KV.get('dobro:sync:' + token);
+    if (!raw) return json({ ok: false, error: 'token', errorText: 'Ссылка недействительна или устарела' }, 404, origin);
+    let info = null;
+    try { info = JSON.parse(raw); } catch {}
+    if (!info || !info.id) return json({ ok: false, error: 'token' }, 404, origin);
+    return json({ ok: true, name: info.name || 'Участник' }, 200, origin);
+  }
+  if (request.method === 'POST' && path === '/dobro/sync/claim') {
+    const body = await request.json().catch(() => null);
+    const token = body && body.token;
+    if (!validSecret(token)) return json({ ok: false, error: 'token', errorText: 'Ссылка недействительна' }, 400, origin);
+    const raw = await env.KV.get('dobro:sync:' + token);
+    if (!raw) return json({ ok: false, error: 'token', errorText: 'Ссылка недействительна или устарела' }, 404, origin);
+    let info = null;
+    try { info = JSON.parse(raw); } catch {}
+    if (!info || !validId(info.id)) return json({ ok: false, error: 'token' }, 404, origin);
+    const state = await getDobro(env.KV);
+    const rec = state.users[info.id];
+    if (!rec) return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    return json({ ok: true, id: info.id, name: rec.name || info.name || 'Участник', hasPin: !!rec.pinHash }, 200, origin);
   }
   if (request.method === 'POST' && path === '/dobro/nick') {
     const body = await request.json().catch(() => null);
@@ -537,6 +681,10 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     const nm = cleanDobroName(body.name);
     if (!nm.ok) return json({ ok: false, error: 'nick' }, 400, origin);
     const state = await getDobro(env.KV);
+    const taken = findDobroUserByName(state, nm.name);
+    if (taken && taken.id !== body.id) {
+      return json({ ok: false, error: 'nick_taken', errorText: 'Такое имя уже занято' }, 409, origin);
+    }
     const rec = state.users[body.id] || { name: nm.name, points: 0, deedCount: 0, deeds: [], lastAt: 0 };
     rec.name = nm.name;
     state.users[body.id] = rec;
@@ -563,11 +711,21 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     if (!rec) {
       const nm = cleanDobroName(body.name);
       if (!nm.ok) return json({ ok: false, error: 'nick' }, 400, origin);
+      const taken = findDobroUserByName(state, nm.name);
+      if (taken && taken.id !== body.id) {
+        return json({ ok: false, error: 'nick_taken', errorText: 'Такое имя уже занято — войдите в существующий аккаунт' }, 409, origin);
+      }
       rec = { name: nm.name, points: 0, deedCount: 0, deeds: [], lastAt: 0 };
       state.users[body.id] = rec;
     } else if (body.name && !rec.name) {
       const nm = cleanDobroName(body.name);
-      if (nm.ok) rec.name = nm.name;
+      if (nm.ok) {
+        const taken = findDobroUserByName(state, nm.name);
+        if (taken && taken.id !== body.id) {
+          return json({ ok: false, error: 'nick_taken', errorText: 'Такое имя уже занято — войдите в существующий аккаунт' }, 409, origin);
+        }
+        rec.name = nm.name;
+      }
     }
     if (rec.lastAt && now - rec.lastAt < DOBRO_DEED_MS) {
       return json({ ok: false, error: 'rate' }, 429, origin);

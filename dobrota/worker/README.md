@@ -1,15 +1,26 @@
-# Доброта — AI-проверка фото (Workers AI)
+# Доброта — Worker (`/dobro/*`)
 
-`/dobro/*` уже крутится на `https://zavhoz-board.sj-polomki.workers.dev`, но исходников этих маршрутов в `server/worker.js` нет. Здесь модули для вливания в Worker.
+Актуальная реализация маршрутов — в `server/worker.js` (`handleDobro`).
+Модули `verify.js` / `dobro-handler.js` — справочные; для деплоя правьте и деплойте `server/worker.js`.
 
-## Файлы
+## Auth / сессия (новые маршруты)
 
-- `verify.js` — hash/anti-reuse, blank check, Workers AI vision
-- `dobro-handler.js` — `GET /dobro/state`, `POST /dobro/deed`, `POST /dobro/nick`
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| POST | `/dobro/register` | `{id?, name, pin}` — создать аккаунт, PIN (4 цифры), уникальный ник |
+| POST | `/dobro/login` | `{name, pin}` — войти в существующий |
+| POST | `/dobro/set-pin` | `{id, pin, oldPin?}` — задать/сменить PIN |
+| POST | `/dobro/sync/issue` | `{id}` — личная ссылка `?sync=` (TTL ~30 дней) |
+| GET | `/dobro/sync/info` | `?token=` — превью имени по ссылке |
+| POST | `/dobro/sync/claim` | `{token}` — получить `id` аккаунта |
+| GET | `/dobro/state` | `me.hasPin`, `me.exists` |
+| POST | `/dobro/nick` | отказ при занятом имени (`nick_taken`) |
 
-## Wrangler binding
+Фронт хранит сессию в localStorage + cookie + IndexedDB и сначала восстанавливает её.
 
-В `server/wrangler.jsonc` добавьте:
+## Wrangler
+
+В `server/wrangler.jsonc` нужен AI binding:
 
 ```jsonc
 {
@@ -19,29 +30,11 @@
 
 KV binding `KV` уже есть (`zavhoz-board`).
 
-## Как влить в Worker
-
-1. Скопируйте `verify.js` и `dobro-handler.js` рядом с `server/worker.js` (или импортируйте по пути).
-2. В `fetch()` до игровых маршрутов:
-
-```js
-import { handleDobro } from './dobro-handler.js';
-// ...
-const path = new URL(request.url).pathname;
-if (path.startsWith('/dobro')) {
-  return handleDobro(request, env, ctx, request.headers.get('Origin') || '*');
-}
-```
-
-3. Убедитесь, что сигнатура `fetch(request, env, ctx)` передаёт `ExecutionContext` (для `waitUntil`).
-
-## Деплой (нужен вручную)
+## Деплой (вручную)
 
 ```bash
 cd server
 npx wrangler deploy
 ```
 
-После деплоя фото обязательно; баллы начисляются только при `status: "approved"`. Пока дело `pending`, фронт показывает «проверяется…».
-
-**Этот PR не деплоит Worker** — только код + фронт.
+**PR с фронтом не деплоит Worker** — после мержа задеплойте Worker сами, иначе login/register/sync на проде не заработают.

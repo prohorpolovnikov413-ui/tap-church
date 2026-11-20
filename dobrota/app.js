@@ -1,6 +1,9 @@
 (() => {
   const API = 'https://zavhoz-board.sj-polomki.workers.dev';
   const STORE = 'dobrota-user-v1';
+  const COOKIE = 'dobrota_uid';
+  const IDB_NAME = 'dobrota-db';
+  const IDB_STORE = 'session';
   const RULES_SEEN = 'dobrota-rules-seen-v1';
   const CATS = [
     { id: 'smile', label: 'Маленькая радость', hint: 'улыбка, комплимент, тёплое слово', points: 5 },
@@ -14,18 +17,95 @@
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), app = $('app');
   let user = null, photo = null, category = 'help', busy = false, prevTab = 'feed';
+  let hasPin = false, pendingSync = '';
 
-  function loadUser() {
-    try { return JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { return null; }
-  }
-  function saveUser(u) {
-    user = u;
-    localStorage.setItem(STORE, JSON.stringify(u));
-  }
   function randId() {
     const a = new Uint8Array(16);
     crypto.getRandomValues(a);
     return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  function validLocalUser(u) {
+    return !!(u && typeof u.id === 'string' && u.id.length >= 8 && typeof u.name === 'string' && u.name.trim().length >= 2);
+  }
+  function readCookie(name) {
+    try {
+      const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&') + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : '';
+    } catch { return ''; }
+  }
+  function writeCookie(name, value) {
+    try {
+      const maxAge = 60 * 60 * 24 * 400;
+      document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=' + maxAge + '; SameSite=Lax';
+    } catch {}
+  }
+  function openIdb() {
+    return new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) return reject(new Error('no idb'));
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('idb'));
+    });
+  }
+  async function idbGet() {
+    try {
+      const db = await openIdb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get('user');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } catch { return null; }
+  }
+  async function idbPut(u) {
+    try {
+      const db = await openIdb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(u, 'user');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {}
+  }
+  function loadUserSync() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (validLocalUser(u)) return { id: u.id, name: String(u.name).trim() };
+      }
+    } catch {}
+    try {
+      const c = readCookie(COOKIE);
+      if (c) {
+        const u = JSON.parse(c);
+        if (validLocalUser(u)) return { id: u.id, name: String(u.name).trim() };
+      }
+    } catch {}
+    return null;
+  }
+  async function loadUserDurable() {
+    let u = loadUserSync();
+    if (validLocalUser(u)) return u;
+    const fromIdb = await idbGet();
+    if (validLocalUser(fromIdb)) {
+      return { id: fromIdb.id, name: String(fromIdb.name).trim() };
+    }
+    return null;
+  }
+  async function saveUser(u) {
+    if (!validLocalUser(u)) return;
+    user = { id: u.id, name: String(u.name).trim() };
+    const payload = JSON.stringify(user);
+    try { localStorage.setItem(STORE, payload); } catch {}
+    writeCookie(COOKIE, payload);
+    await idbPut(user);
   }
   function deedsWord(count) {
     const n = Math.abs(count) % 100, n1 = n % 10;
@@ -209,8 +289,27 @@
     setTab(prevTab === 'rules' ? 'add' : prevTab || 'add');
   }
 
+  function updatePinUi() {
+    const oldWrap = $('pin-old-wrap');
+    const hint = $('pin-hint');
+    const label = $('pin-new-label');
+    const submit = $('pin-submit');
+    if (oldWrap) oldWrap.classList.toggle('hidden', !hasPin);
+    if (hint) {
+      hint.textContent = hasPin
+        ? 'PIN уже задан. Чтобы сменить — введите текущий и новый.'
+        : 'Задайте PIN из 4 цифр, чтобы входить с другого устройства по имени.';
+    }
+    if (label) label.textContent = hasPin ? 'Новый PIN (4 цифры)' : 'PIN (4 цифры)';
+    if (submit) submit.textContent = hasPin ? 'Сменить PIN' : 'Сохранить PIN';
+  }
+
   function renderState(data) {
     const me = data.me || { name: user.name, totalPoints: 0, deedCount: 0 };
+    if (typeof me.hasPin === 'boolean') {
+      hasPin = me.hasPin;
+      updatePinUi();
+    }
     $('nick').value = me.name || user.name;
     $('me-line').innerHTML = `У вас сейчас <strong>${me.totalPoints}</strong> баллов и <strong>${me.deedCount}</strong> ${deedsWord(me.deedCount)}`;
     const chip = $('me-chip');
@@ -254,8 +353,17 @@
     show($('loading'), 'Загружаем…', true);
     try {
       const data = await api('/dobro/state?id=' + encodeURIComponent(user.id));
+      if (data.me && data.me.exists === false) {
+        // Local session points to unknown id — ask to log in again
+        user = null;
+        try { localStorage.removeItem(STORE); } catch {}
+        showGate('login');
+        show($('login-err'), 'Сессия не найдена на сервере. Войдите по имени и PIN или по ссылке.', true);
+        show($('loading'), '', false);
+        return;
+      }
       if (data.me && data.me.name && data.me.name !== user.name) {
-        saveUser({ id: user.id, name: data.me.name });
+        await saveUser({ id: user.id, name: data.me.name });
       }
       renderState(data);
     } catch (e) {
@@ -265,24 +373,154 @@
     }
   }
 
-  function enterApp(initialTab) {
+  function showGate(mode) {
+    gate.classList.remove('hidden');
+    app.classList.add('hidden');
+    const reg = $('gate-mode-register');
+    const log = $('gate-mode-login');
+    const syn = $('gate-mode-sync');
+    const sub = $('gate-sub');
+    if (reg) reg.classList.toggle('hidden', mode !== 'register');
+    if (log) log.classList.toggle('hidden', mode !== 'login');
+    if (syn) syn.classList.toggle('hidden', mode !== 'sync');
+    if (sub) {
+      if (mode === 'login') sub.textContent = 'Войдите в существующий аккаунт по имени и PIN.';
+      else if (mode === 'sync') sub.textContent = 'Восстановление аккаунта по личной ссылке.';
+      else sub.textContent = 'Создайте аккаунт: имя в рейтинге и PIN из 4 цифр. На этом устройстве вход сохранится.';
+    }
+    show($('gate-err'), '', false);
+    show($('login-err'), '', false);
+    show($('sync-err'), '', false);
+  }
+
+  async function enterApp(initialTab) {
     gate.classList.add('hidden');
     app.classList.remove('hidden');
     renderCats();
     updateAddLabel();
+    updatePinUi();
     setTab(initialTab || 'feed');
-    loadAll();
+    await loadAll();
   }
 
-  $('gate-form').addEventListener('submit', (ev) => {
+  function cleanPin(raw) {
+    const s = String(raw || '').trim();
+    return /^\d{4}$/.test(s) ? s : '';
+  }
+
+  function stripSyncFromUrl() {
+    try {
+      const u = new URL(location.href);
+      if (!u.searchParams.has('sync')) return;
+      u.searchParams.delete('sync');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch {}
+  }
+
+  $('gate-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
+    if (busy) return;
     const name = $('gate-name').value.trim();
+    const pin = cleanPin($('gate-pin').value);
+    const pin2 = cleanPin($('gate-pin2').value);
     if (name.length < 2) {
       show($('gate-err'), 'Имя должно быть не короче 2 символов', true);
       return;
     }
-    saveUser({ id: randId(), name });
-    enterApp();
+    if (!pin) {
+      show($('gate-err'), 'PIN — ровно 4 цифры', true);
+      return;
+    }
+    if (pin !== pin2) {
+      show($('gate-err'), 'PIN и повтор не совпадают', true);
+      return;
+    }
+    busy = true;
+    show($('gate-err'), '', false);
+    $('gate-submit').disabled = true;
+    try {
+      const id = randId();
+      const data = await api('/dobro/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, name, pin })
+      });
+      hasPin = true;
+      await saveUser({ id: data.id || id, name: data.name || name });
+      await enterApp();
+    } catch (e) {
+      const msg = e.message || 'Не удалось создать аккаунт';
+      show($('gate-err'), msg, true);
+      if (/занято|уже есть|войдите/i.test(msg)) {
+        $('login-name').value = name;
+        showGate('login');
+        show($('login-err'), msg, true);
+      }
+    } finally {
+      busy = false;
+      $('gate-submit').disabled = false;
+    }
+  });
+
+  $('login-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    const name = $('login-name').value.trim();
+    const pin = cleanPin($('login-pin').value);
+    if (name.length < 2) {
+      show($('login-err'), 'Введите имя аккаунта', true);
+      return;
+    }
+    if (!pin) {
+      show($('login-err'), 'PIN — ровно 4 цифры', true);
+      return;
+    }
+    busy = true;
+    show($('login-err'), '', false);
+    $('login-submit').disabled = true;
+    try {
+      const data = await api('/dobro/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, pin })
+      });
+      hasPin = !!data.hasPin;
+      await saveUser({ id: data.id, name: data.name || name });
+      await enterApp();
+    } catch (e) {
+      show($('login-err'), e.message || 'Не удалось войти', true);
+    } finally {
+      busy = false;
+      $('login-submit').disabled = false;
+    }
+  });
+
+  $('btn-have-account').addEventListener('click', () => showGate('login'));
+  $('btn-new-account').addEventListener('click', () => showGate('register'));
+  $('btn-sync-other').addEventListener('click', () => showGate('login'));
+
+  $('sync-claim-btn').addEventListener('click', async () => {
+    if (busy || !pendingSync) return;
+    busy = true;
+    show($('sync-err'), '', false);
+    $('sync-claim-btn').disabled = true;
+    try {
+      const data = await api('/dobro/sync/claim', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: pendingSync })
+      });
+      hasPin = !!data.hasPin;
+      await saveUser({ id: data.id, name: data.name || 'Участник' });
+      pendingSync = '';
+      stripSyncFromUrl();
+      await enterApp();
+    } catch (e) {
+      show($('sync-err'), e.message || 'Ссылка не сработала', true);
+    } finally {
+      busy = false;
+      $('sync-claim-btn').disabled = false;
+    }
   });
 
   async function onPick(file) {
@@ -366,13 +604,86 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: user.id, name: $('nick').value })
       });
-      saveUser({ id: user.id, name: data.name || $('nick').value.trim() });
+      await saveUser({ id: user.id, name: data.name || $('nick').value.trim() });
       show($('flash'), 'Имя в рейтинге обновлено', true);
       await loadAll();
     } catch (e) {
       show($('error'), e.message || 'Ошибка', true);
     } finally {
       busy = false;
+    }
+  });
+
+  $('pin-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (busy || !user) return;
+    const pin = cleanPin($('pin-new').value);
+    const oldPin = cleanPin($('pin-old').value);
+    if (!pin) {
+      show($('error'), 'PIN — ровно 4 цифры', true);
+      return;
+    }
+    if (hasPin && !oldPin) {
+      show($('error'), 'Введите текущий PIN', true);
+      return;
+    }
+    busy = true;
+    show($('error'), '', false);
+    show($('flash'), '', false);
+    try {
+      const body = { id: user.id, pin };
+      if (hasPin) body.oldPin = oldPin;
+      await api('/dobro/set-pin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      hasPin = true;
+      updatePinUi();
+      $('pin-new').value = '';
+      $('pin-old').value = '';
+      show($('flash'), 'PIN сохранён', true);
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось сохранить PIN', true);
+    } finally {
+      busy = false;
+    }
+  });
+
+  async function makeSyncLink() {
+    if (busy || !user) return;
+    busy = true;
+    show($('error'), '', false);
+    show($('flash'), '', false);
+    try {
+      const data = await api('/dobro/sync/issue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id })
+      });
+      const url = location.origin + location.pathname.replace(/\/?$/, '/') + '?sync=' + encodeURIComponent(data.token);
+      $('sync-url').value = url;
+      show($('flash'), 'Ссылка готова — откройте её на другом устройстве', true);
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось создать ссылку', true);
+    } finally {
+      busy = false;
+    }
+  }
+  $('sync-make').addEventListener('click', makeSyncLink);
+  $('sync-copy').addEventListener('click', async () => {
+    const v = $('sync-url').value;
+    if (!v) {
+      await makeSyncLink();
+    }
+    const text = $('sync-url').value;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      show($('flash'), 'Ссылка скопирована', true);
+    } catch {
+      $('sync-url').select();
+      show($('flash'), 'Скопируйте ссылку вручную', true);
     }
   });
 
@@ -390,8 +701,40 @@
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
   }
 
-  const bootTab = new URLSearchParams(location.search).get('tab');
-  const okTab = ['add', 'feed', 'board', 'history', 'profile', 'rules'].includes(bootTab) ? bootTab : 'feed';
-  user = loadUser();
-  if (user && user.id && user.name) enterApp(okTab);
+  async function boot() {
+    const params = new URLSearchParams(location.search);
+    const bootTab = params.get('tab');
+    const okTab = ['add', 'feed', 'board', 'history', 'profile', 'rules'].includes(bootTab) ? bootTab : 'feed';
+    const syncToken = (params.get('sync') || '').trim();
+
+    user = await loadUserDurable();
+    if (validLocalUser(user)) {
+      await saveUser(user); // refresh all stores
+      if (syncToken) {
+        // Already logged in — ignore sync or offer? Prefer keep current session, strip sync
+        stripSyncFromUrl();
+      }
+      await enterApp(okTab);
+      return;
+    }
+
+    if (syncToken) {
+      pendingSync = syncToken;
+      showGate('sync');
+      try {
+        const info = await api('/dobro/sync/info?token=' + encodeURIComponent(syncToken));
+        const hint = $('sync-restore-hint');
+        if (hint && info.name) {
+          hint.textContent = 'Ссылка ведёт в аккаунт «' + info.name + '». Подтвердите вход на этом устройстве.';
+        }
+      } catch (e) {
+        show($('sync-err'), e.message || 'Ссылка недействительна', true);
+      }
+      return;
+    }
+
+    showGate('register');
+  }
+
+  boot().catch(() => showGate('register'));
 })();
