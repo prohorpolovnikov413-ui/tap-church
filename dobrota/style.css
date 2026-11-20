@@ -146,6 +146,7 @@ ol.board li:first-child, ul.hist li:first-child { border-top: 0; }
 .pts-sm { flex: none; font-weight: 700; color: var(--teal-deep); }
 .thumb { width: 4.25rem; height: 4.25rem; object-fit: cover; border-radius: .35rem; flex: none; border: 1px solid var(--line); }
 .status-row { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .35rem; }
+.status-row .recover-deed { padding: .35rem .7rem; font-size: .78rem; margin: 0; }
 .badge {
   display: inline-flex; align-items: center;
   font-family: var(--font-display); font-size: .68rem; font-weight: 700;
