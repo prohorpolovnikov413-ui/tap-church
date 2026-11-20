@@ -289,8 +289,6 @@ const DOBRO_FEED_MAX = 50;
 const DOBRO_HIST_MAX = 50;
 const DOBRO_PHOTO_MAX = 60 * 1024;
 const DOBRO_DEED_MS = 10000;
-const DOBRO_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
-const DOBRO_PHASH_PREFIX = 'dobro:phash:';
 const DOBRO_CATS = {
   smile: { id: 'smile', points: 5, label: 'Маленькая радость' },
   help: { id: 'help', points: 15, label: 'Практическая помощь' },
@@ -320,8 +318,9 @@ function cleanDobroTitle(raw) {
 }
 
 function parseDobroPhoto(value) {
+  // Photo is optional — empty means no photo attached
   if (value == null || value === '') {
-    return { ok: false, error: 'photo', errorText: 'Нужно приложить фото доброго дела' };
+    return { ok: true, photo: null, base64: '' };
   }
   if (typeof value !== 'string') return { ok: false, error: 'photo', errorText: 'Неверный формат фото' };
   const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(value);
@@ -333,108 +332,6 @@ function parseDobroPhoto(value) {
   if (bytes > DOBRO_PHOTO_MAX) return { ok: false, error: 'photo', errorText: 'Фото слишком большое' };
   const mime = value.slice(5, value.indexOf(';'));
   return { ok: true, photo: `data:${mime};base64,${b64}`, base64: b64 };
-}
-
-async function dobroPhotoHash(base64) {
-  const bin = atob(base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const dig = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(dig)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function dobroLooksBlank(base64) {
-  const bin = atob(base64);
-  if (bin.length < 1200) return true;
-  let sum = 0, sumSq = 0, n = 0;
-  const step = Math.max(1, Math.floor(bin.length / 400));
-  for (let i = 0; i < bin.length; i += step) {
-    const v = bin.charCodeAt(i);
-    sum += v; sumSq += v * v; n++;
-  }
-  const mean = sum / n;
-  return (sumSq / n - mean * mean) < 18;
-}
-
-function dobroExtractJson(text) {
-  if (!text) return null;
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  const raw = (fenced ? fenced[1] : text).trim();
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  try { return JSON.parse(raw.slice(start, end + 1)); } catch { return null; }
-}
-
-function dobroVerifyPrompt(title, categoryLabel) {
-  return [
-    'Ты модератор приложения «Доброта». Проверь фото к записи о добром деле.',
-    `Текст дела: «${title}». Категория: «${categoryLabel}».`,
-    'Одобряй только если на фото видно реальное жизненное событие, правдоподобно связанное с текстом.',
-    'Отклоняй: скриншоты приложений/сайтов, мемы, стоковые картинки из интернета, коллажи, пустые/размытые/чёрные кадры, фото без связи с делом.',
-    'Ответь ТОЛЬКО JSON без markdown: {"approved":true|false,"reason":"кратко по-русски (до 120 символов)"}'
-  ].join('\n');
-}
-
-async function verifyDobroPhoto(env, { title, categoryLabel, photo, base64, userId }) {
-  const hash = await dobroPhotoHash(base64);
-  const hashKey = DOBRO_PHASH_PREFIX + hash;
-  const used = await env.KV.get(hashKey);
-  if (used) {
-    return {
-      status: 'rejected',
-      reason: used === userId ? 'Вы уже отправляли это же фото' : 'Это фото уже использовали раньше',
-      hash
-    };
-  }
-  if (dobroLooksBlank(base64)) {
-    return { status: 'rejected', reason: 'Фото пустое или слишком маленькое', hash };
-  }
-  if (!env.AI || typeof env.AI.run !== 'function') {
-    return { status: 'rejected', reason: 'Проверка фото временно недоступна (нет AI binding)', hash };
-  }
-
-  let modelText = '';
-  try {
-    const result = await env.AI.run(DOBRO_VISION_MODEL, {
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: dobroVerifyPrompt(title, categoryLabel) },
-          { type: 'image_url', image_url: { url: photo } }
-        ]
-      }],
-      max_tokens: 200
-    });
-    modelText = (typeof result === 'string' && result)
-      || result?.response || result?.description || result?.result
-      || (Array.isArray(result?.content) ? result.content.map((c) => c.text || '').join(' ') : '')
-      || JSON.stringify(result);
-  } catch {
-    try {
-      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-      const result = await env.AI.run(DOBRO_VISION_MODEL, {
-        prompt: dobroVerifyPrompt(title, categoryLabel),
-        image: [...bytes],
-        max_tokens: 200
-      });
-      modelText = (typeof result === 'string' && result)
-        || result?.response || result?.description || JSON.stringify(result);
-    } catch {
-      return { status: 'rejected', reason: 'Не удалось проверить фото. Попробуйте ещё раз', hash };
-    }
-  }
-
-  const parsed = dobroExtractJson(String(modelText));
-  const approved = !!(parsed && parsed.approved === true);
-  let reason = String((parsed && parsed.reason) || '').trim().slice(0, 140);
-  if (!reason) {
-    reason = approved ? 'Фото подтверждает доброе дело' : 'Фото не подтверждает описанное дело';
-  }
-  if (approved) {
-    await env.KV.put(hashKey, userId, { expirationTtl: 60 * 60 * 24 * 180 });
-  }
-  return { status: approved ? 'approved' : 'rejected', reason, hash };
 }
 
 function emptyDobro() {
@@ -703,7 +600,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     if (!cat) return json({ ok: false, error: 'category' }, 400, origin);
     const pic = parseDobroPhoto(body.photo);
     if (!pic.ok) {
-      return json({ ok: false, error: 'photo', errorText: pic.errorText || 'Нужно приложить фото' }, 400, origin);
+      return json({ ok: false, error: 'photo', errorText: pic.errorText || 'Неверный формат фото' }, 400, origin);
     }
     const state = await getDobro(env.KV);
     const now = Date.now();
@@ -731,65 +628,39 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       return json({ ok: false, error: 'rate' }, 429, origin);
     }
     const deedId = state.seq++;
+    const points = cat.points;
     const deed = {
       id: deedId,
       title: title.title,
       category: cat.id,
-      points: 0,
-      awardPoints: cat.points,
+      points,
+      awardPoints: points,
       createdAt: new Date(now).toISOString(),
-      photo: pic.photo,
-      status: 'pending',
-      reason: 'Проверяем фото…'
+      photo: pic.photo || null,
+      status: 'approved',
+      reason: ''
     };
     rec.deeds.unshift(deed);
+    rec.points = (rec.points || 0) + points;
+    rec.deedCount = (rec.deedCount || 0) + 1;
     rec.lastAt = now;
+    // Feed shows photo deeds; text-only deeds still count for board/history
+    if (deed.photo) {
+      state.feed.unshift({
+        id: deed.id,
+        title: deed.title,
+        category: deed.category,
+        points: deed.points,
+        createdAt: deed.createdAt,
+        photo: deed.photo,
+        authorName: rec.name || 'Участник',
+        authorId: body.id,
+        status: 'approved',
+        reason: ''
+      });
+    }
     pruneDobroPhotos(state);
     await putDobro(env.KV, state);
-
-    const userId = body.id;
-    const authorName = rec.name || 'Участник';
-    const runVerify = async () => {
-      const result = await verifyDobroPhoto(env, {
-        title: title.title,
-        categoryLabel: cat.label,
-        photo: pic.photo,
-        base64: pic.base64,
-        userId
-      });
-      const st = await getDobro(env.KV);
-      const user = st.users[userId];
-      if (!user || !Array.isArray(user.deeds)) return;
-      const idx = user.deeds.findIndex((d) => d.id === deedId);
-      if (idx < 0) return;
-      const cur = user.deeds[idx];
-      cur.status = result.status;
-      cur.reason = result.reason;
-      if (result.status === 'approved') {
-        cur.points = cur.awardPoints || cat.points;
-        user.points = (user.points || 0) + cur.points;
-        user.deedCount = (user.deedCount || 0) + 1;
-        st.feed.unshift({
-          id: cur.id,
-          title: cur.title,
-          category: cur.category,
-          points: cur.points,
-          createdAt: cur.createdAt,
-          photo: cur.photo,
-          authorName,
-          authorId: userId,
-          status: 'approved',
-          reason: result.reason
-        });
-      } else {
-        cur.points = 0;
-      }
-      pruneDobroPhotos(st);
-      await putDobro(env.KV, st);
-    };
-
-    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(runVerify());
-    else await runVerify();
 
     return json({
       ok: true,
@@ -797,11 +668,11 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         id: deed.id,
         title: deed.title,
         category: deed.category,
-        points: 0,
+        points: deed.points,
         createdAt: deed.createdAt,
         photoUrl: deed.photo || null,
-        status: 'pending',
-        reason: deed.reason
+        status: 'approved',
+        reason: ''
       }
     }, 201, origin);
   }

@@ -1,9 +1,9 @@
 # Доброта — Worker (`/dobro/*`)
 
 Актуальная реализация маршрутов — в `server/worker.js` (`handleDobro`).
-Модули `verify.js` / `dobro-handler.js` — справочные; для деплоя правьте и деплойте `server/worker.js`.
+Модули `verify.js` / `dobro-handler.js` — устаревший справочник (ИИ-проверка фото отключена).
 
-## Auth / сессия (новые маршруты)
+## Auth / сессия
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
@@ -15,20 +15,7 @@
 | POST | `/dobro/sync/claim` | `{token}` — получить `id` аккаунта |
 | GET | `/dobro/state` | `me.hasPin`, `me.exists` |
 | POST | `/dobro/nick` | отказ при занятом имени (`nick_taken`) |
-
-Фронт хранит сессию в localStorage + cookie + IndexedDB и сначала восстанавливает её.
-
-## Wrangler
-
-В `server/wrangler.jsonc` нужен AI binding:
-
-```jsonc
-{
-  "ai": { "binding": "AI" }
-}
-```
-
-KV binding `KV` уже есть (`zavhoz-board`).
+| POST | `/dobro/deed` | дело сразу `approved`; фото **опционально**; **без** Workers AI |
 
 ## Деплой (вручную)
 
@@ -37,4 +24,4 @@ cd server
 npx wrangler deploy
 ```
 
-**PR с фронтом не деплоит Worker** — после мержа задеплойте Worker сами, иначе login/register/sync на проде не заработают.
+После отключения ИИ-проверки задеплойте Worker, иначе прод продолжит гонять vision на `/dobro/deed`.
