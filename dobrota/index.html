@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#121212">
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#141413">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17,41 +17,41 @@
   <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="gate" class="gate">
     <div class="box">
       <p class="brand">Доброта</p>
-      <h1 class="lead">Делай доброе дело — сфотографируй — поднимайся в рейтинге</h1>
-      <p class="sub" id="gate-sub">Создайте аккаунт: имя в рейтинге и PIN из 4 цифр. На этом устройстве вход сохранится.</p>
+      <h1 class="lead">Дело · фото · рейтинг</h1>
+      <p class="sub" id="gate-sub">Имя и PIN · вход сохранится</p>
 
       <div id="gate-mode-register" class="gate-mode">
         <form id="gate-form" class="nick-form gate-form">
           <label>
-            <span>Ваше имя</span>
-            <input type="text" id="gate-name" maxlength="40" required placeholder="Например, Мария" autocomplete="nickname">
+            <span>Имя</span>
+            <input type="text" id="gate-name" maxlength="40" required placeholder="Мария" autocomplete="nickname">
           </label>
           <label>
-            <span>PIN (4 цифры)</span>
+            <span>PIN</span>
             <input type="password" id="gate-pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
           </label>
           <label>
-            <span>Повторите PIN</span>
+            <span>Ещё раз</span>
             <input type="password" id="gate-pin2" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
           </label>
-          <button class="btn" type="submit" id="gate-submit">Создать аккаунт</button>
+          <button class="btn" type="submit" id="gate-submit">Создать</button>
           <p id="gate-err" class="msg err hidden"></p>
         </form>
-        <button type="button" class="btn btn-ghost gate-switch" id="btn-have-account">У меня уже есть аккаунт — войти</button>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-have-account">Войти</button>
       </div>
 
       <div id="gate-mode-login" class="gate-mode hidden">
         <form id="login-form" class="nick-form gate-form">
           <label>
-            <span>Имя аккаунта</span>
-            <input type="text" id="login-name" maxlength="40" required placeholder="Как при регистрации" autocomplete="username">
+            <span>Имя</span>
+            <input type="text" id="login-name" maxlength="40" required placeholder="Имя" autocomplete="username">
           </label>
           <label>
             <span>PIN</span>
@@ -60,15 +60,15 @@
           <button class="btn" type="submit" id="login-submit">Войти</button>
           <p id="login-err" class="msg err hidden"></p>
         </form>
-        <button type="button" class="btn btn-ghost gate-switch" id="btn-new-account">Создать новый аккаунт</button>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-new-account">Создать</button>
       </div>
 
       <div id="gate-mode-sync" class="gate-mode hidden">
-        <p class="sync-restore-title">Восстановление по ссылке</p>
-        <p class="sub tight" id="sync-restore-hint">Открыта личная ссылка входа. Подтвердите, чтобы войти в существующий аккаунт.</p>
-        <button class="btn" type="button" id="sync-claim-btn">Войти в аккаунт</button>
+        <p class="sync-restore-title">Ссылка</p>
+        <p class="sub tight" id="sync-restore-hint">Подтвердите вход</p>
+        <button class="btn" type="button" id="sync-claim-btn">Войти</button>
         <p id="sync-err" class="msg err hidden"></p>
-        <button type="button" class="btn btn-ghost gate-switch" id="btn-sync-other">Войти по имени и PIN</button>
+        <button type="button" class="btn btn-ghost gate-switch" id="btn-sync-other">Имя и PIN</button>
       </div>
     </div>
   </div>
@@ -89,23 +89,19 @@
 
     <main class="app-main" id="app-main">
       <section id="panel-add" class="panel" data-title="Новое дело" hidden>
-        <p class="kicker">Новая запись</p>
-        <h2>Что хорошего вы сделали?</h2>
-        <p class="hint">Опишите дело, выберите категорию и приложите фото — проверка мягкая, без лишней строгости.</p>
         <form id="deed-form">
           <label class="block-label">
-            <span>Описание</span>
-            <textarea id="title" maxlength="160" required placeholder="Например: помог соседке донести сумки до двери"></textarea>
+            <span>Что сделали</span>
+            <textarea id="title" maxlength="160" required placeholder="Коротко…"></textarea>
           </label>
           <div>
-            <p class="lbl">Фото доброго дела</p>
-            <p class="hint tight">ИИ только отсекает недопустимый контент. Обычные кадры добрых дел проходят.</p>
-            <button type="button" class="rules-link" id="btn-rules-add">ℹ Правила проверки фото</button>
+            <p class="lbl">Фото</p>
             <div class="photo-actions">
-              <button type="button" class="btn btn-ghost" id="btn-camera">Сфотографировать</button>
-              <button type="button" class="btn btn-ghost" id="btn-gallery">Из галереи</button>
-              <button type="button" class="linkish hidden" id="btn-del-photo">Убрать фото</button>
+              <button type="button" class="btn btn-cam" id="btn-camera">Камера</button>
+              <button type="button" class="btn btn-ghost" id="btn-gallery">Галерея</button>
+              <button type="button" class="linkish hidden" id="btn-del-photo">Убрать</button>
             </div>
+            <button type="button" class="rules-link" id="btn-rules-add">Правила</button>
             <input id="cam" class="file" type="file" accept="image/*" capture="environment">
             <input id="gal" class="file" type="file" accept="image/jpeg,image/png,image/webp">
             <img id="preview" class="preview hidden" alt="Превью фото">
@@ -113,73 +109,80 @@
           <fieldset class="cats" id="cats"></fieldset>
           <div class="row-actions">
             <button class="btn" id="btn-add" type="submit">Добавить</button>
-            <p class="muted" id="me-line"></p>
+            <p class="muted quiet" id="me-line"></p>
           </div>
         </form>
       </section>
 
       <section id="panel-feed" class="panel active" data-title="Лента">
-        <p class="kicker">Лента</p>
-        <h2>Добрые дела в кадре</h2>
-        <p class="hint">Последние записи с фото от всех участников.</p>
+        <div class="daily-card" id="daily-card">
+          <p class="kicker warm">Сегодня</p>
+          <h2 id="daily-title">…</h2>
+          <button type="button" class="btn btn-soft" id="btn-daily">Сделать</button>
+        </div>
+        <div class="feed-filters" id="feed-filters" role="tablist" aria-label="Фильтр ленты">
+          <button type="button" class="feed-filter on" data-filter="all">Все</button>
+          <button type="button" class="feed-filter" data-filter="friends">Друзья</button>
+          <button type="button" class="feed-filter" data-filter="mine">Мои</button>
+          <button type="button" class="feed-filter" data-filter="today">День</button>
+        </div>
         <div id="feed-list"></div>
       </section>
 
       <section id="panel-board" class="panel" data-title="Рейтинг" hidden>
-        <p class="kicker">Рейтинг</p>
-        <h2>Кто поднимается выше</h2>
-        <p class="hint">Чем больше добрых дел и баллов — тем выше место в таблице.</p>
         <ol class="board" id="board-list"></ol>
       </section>
 
       <section id="panel-history" class="panel" data-title="История" hidden>
-        <p class="kicker">Ваши дела</p>
-        <h2>История доброты</h2>
-        <p class="hint">Все добрые дела, которые вы уже отметили.</p>
         <ul class="hist" id="hist-list"></ul>
       </section>
 
       <section id="panel-profile" class="panel" data-title="Профиль" hidden>
-        <p class="kicker">Профиль</p>
-        <h2>Ваше имя в рейтинге</h2>
-        <p class="hint">Имя видно всем участникам. Дубликаты имён не допускаются.</p>
         <form id="nick-form" class="nick-form">
           <label>
-            <span>Имя в рейтинге</span>
+            <span>Имя</span>
             <input type="text" id="nick" maxlength="40">
           </label>
-          <button class="btn btn-ghost" type="submit">Сохранить имя</button>
+          <button class="btn btn-ghost" type="submit">Сохранить</button>
         </form>
-        <p class="profile-note muted" id="profile-note"></p>
+        <p class="profile-note muted quiet" id="profile-note"></p>
+
+        <div class="profile-block rewards-block" id="rewards-block">
+          <div class="streak-row" id="streak-row">
+            <span class="streak-flame" aria-hidden="true">🔥</span>
+            <p class="streak-count" id="streak-count">0 дней</p>
+          </div>
+          <div class="level-row" id="level-row">
+            <span class="level-badge" id="level-badge">Помощник</span>
+          </div>
+          <div class="badges-grid" id="badges-grid"></div>
+        </div>
 
         <div class="profile-block" id="pin-block">
-          <h3 class="profile-h3">PIN для входа</h3>
-          <p class="hint tight" id="pin-hint">PIN нужен, чтобы войти с другого телефона или браузера по имени.</p>
+          <h3 class="profile-h3">PIN</h3>
           <form id="pin-form" class="nick-form gate-form">
             <label id="pin-old-wrap" class="hidden">
-              <span>Текущий PIN</span>
+              <span>Сейчас</span>
               <input type="password" id="pin-old" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="••••" autocomplete="current-password">
             </label>
             <label>
-              <span id="pin-new-label">Новый PIN (4 цифры)</span>
+              <span id="pin-new-label">Новый</span>
               <input type="password" id="pin-new" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required placeholder="••••" autocomplete="new-password">
             </label>
-            <button class="btn btn-ghost" type="submit" id="pin-submit">Сохранить PIN</button>
+            <button class="btn btn-ghost" type="submit" id="pin-submit">Сохранить</button>
           </form>
         </div>
 
         <div class="profile-block syncbox">
-          <h3 class="profile-h3">Вход на другом устройстве</h3>
-          <p class="hint tight">Создайте личную ссылку и откройте её на другом телефоне или в другом браузере — войдёте в этот же аккаунт.</p>
+          <h3 class="profile-h3">Ссылка входа</h3>
           <div class="synclink">
-            <input id="sync-url" readonly value="" placeholder="Сначала создайте ссылку" aria-label="Ссылка для входа">
+            <input id="sync-url" readonly value="" placeholder="Создайте ссылку" aria-label="Ссылка для входа">
             <button type="button" class="btn btn-ghost" id="sync-copy">Копировать</button>
           </div>
-          <p class="syncwarn">Не отправляйте ссылку другим — это ваш аккаунт.</p>
-          <button type="button" class="btn" id="sync-make">Создать ссылку</button>
+          <button type="button" class="btn btn-ghost" id="sync-make">Создать</button>
         </div>
 
-        <button type="button" class="btn btn-ghost rules-profile-btn" id="btn-rules-profile">Правила проверки фото</button>
+        <button type="button" class="btn btn-ghost rules-profile-btn" id="btn-rules-profile">Правила</button>
       </section>
 
       <section id="panel-rules" class="panel panel-rules" data-title="Правила" hidden>
@@ -187,74 +190,43 @@
           <div class="rules-hero-icon" aria-hidden="true">
             <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 14v2m0 6v12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
           </div>
-          <p class="kicker">Мягкая проверка</p>
-          <h2>Правила проверки фото</h2>
-          <p class="hint">ИИ не требует «доказательств» доброго дела. Он только отсекает то, чего нельзя показывать в ленте.</p>
+          <h2 class="page-title" style="margin-bottom:.35rem">Правила фото</h2>
+          <p class="hint quiet">Отсекаем только запрещённое</p>
         </div>
 
-        <article class="rules-card rules-card-accent">
-          <h3>Как это работает</h3>
-          <p>Обычные кадры добрых дел <strong>принимаются</strong>. Отклонение — только при недопустимом содержимом; причина будет короткой и понятной.</p>
-          <div class="rules-result-row">
-            <div class="rules-pill ok"><span>✅</span><div><strong>Принято</strong><small>баллы начисляются</small></div></div>
-            <div class="rules-pill bad"><span>❌</span><div><strong>Отклонено</strong><small>понятная причина</small></div></div>
-          </div>
-        </article>
-
-        <h3 class="rules-section-title">Так можно</h3>
+        <h3 class="rules-section-title">Можно</h3>
         <div class="rules-grid">
           <div class="rules-ex good">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 28v-8h4v8h8v-12h4L20 6 8 16h4v12z" fill="currentColor"/></svg></div>
-            <strong>Любой обычный кадр</strong>
-            <span>помощь, вещи, место, руки, улыбка</span>
+            <strong>Обычный кадр</strong>
           </div>
           <div class="rules-ex good">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 20l3 3 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
-            <strong>Без строгости</strong>
-            <span>не нужно доказывать дело «как в суде»</span>
-          </div>
-          <div class="rules-ex good">
-            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M8 28c4-10 20-10 24 0" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="14" cy="14" r="3" fill="currentColor"/><circle cx="26" cy="12" r="2.5" fill="currentColor"/></svg></div>
-            <strong>Неидеально — ок</strong>
-            <span>размыто, темно, не весь кадр — можно</span>
+            <strong>Неидеально</strong>
           </div>
         </div>
 
-        <h3 class="rules-section-title">Так нельзя</h3>
+        <h3 class="rules-section-title">Нельзя</h3>
         <div class="rules-grid">
           <div class="rules-ex bad">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="12" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14 20h12" stroke="currentColor" stroke-width="2"/></svg></div>
-            <strong>18+ и эротика</strong>
-            <span>обнажёнка, сексуальный контент</span>
+            <strong>18+</strong>
           </div>
           <div class="rules-ex bad">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 28c2-8 14-8 16 0" fill="none" stroke="currentColor" stroke-width="2"/><rect x="17" y="10" width="6" height="12" rx="2" fill="currentColor"/></svg></div>
-            <strong>Курение и вейп</strong>
-            <span>сигареты, вейпы, табак</span>
+            <strong>Курение</strong>
           </div>
           <div class="rules-ex bad">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M14 28h12v-2a6 6 0 0 0-12 0v2z" fill="currentColor"/><path d="M18 12h4v8h-4z" fill="currentColor"/></svg></div>
-            <strong>Алкоголь и наркотики</strong>
-            <span>бутылки, бокалы, атрибуты употребления</span>
+            <strong>Алкоголь</strong>
           </div>
           <div class="rules-ex bad">
             <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M8 30L32 10M20 8l4 12-10 2z" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
-            <strong>Насилие и оружие</strong>
-            <span>кровь, ранения, оружие, жестокость</span>
-          </div>
-          <div class="rules-ex bad">
-            <div class="rules-ico" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M12 26c2-6 14-6 16 0" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="2" fill="currentColor"/><circle cx="24" cy="16" r="2" fill="currentColor"/><path d="M18 22h4" stroke="currentColor" stroke-width="2"/></svg></div>
-            <strong>Неприличные жесты</strong>
-            <span>средний палец и подобное</span>
+            <strong>Насилие</strong>
           </div>
         </div>
 
-        <article class="rules-card">
-          <h3>Одно фото — один раз</h3>
-          <p>Одинаковый снимок нельзя отправлять повторно — так лента остаётся свежей.</p>
-        </article>
-
-        <button type="button" class="btn rules-done" id="btn-rules-done">Понятно</button>
+        <button type="button" class="btn rules-done" id="btn-rules-done">OK</button>
       </section>
     </main>
 
@@ -267,8 +239,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-7.45 5.1l1.86.64A6 6 0 1 0 12 6V3l4 3.5L12 10V7a5 5 0 1 1-4.9 6.1l-1.96.4A7 7 0 1 0 12 4z"/></svg>
         <span>История</span>
       </button>
-      <button type="button" class="tab tab-fab" data-tab="add" aria-label="Добавить дело">
-        <span class="fab">+</span>
+      <button type="button" class="tab tab-fab" data-tab="add" aria-label="Добавить" id="tab-add">
+        <span class="fab" id="fab-add">+</span>
         <span>Дело</span>
       </button>
       <button type="button" class="tab" data-tab="board" aria-label="Рейтинг">
@@ -281,6 +253,7 @@
       </button>
     </nav>
   </div>
+  <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
   <script src="app.js"></script>
 </body>
 </html>
