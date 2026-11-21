@@ -845,7 +845,7 @@ function newDobroSyncToken() {
 const DOBRO_PUSH_USERS = 'dobro:push:users';
 const DOBRO_PUSH_U = (id) => 'dobro:push:u:' + id;
 // Must match client VAPID_PUBLIC_KEY (base64url uncompressed P-256). Fill after keygen.
-const DOBRO_VAPID_PUBLIC_KEY = '';
+const DOBRO_VAPID_PUBLIC_KEY = 'BPJeqvTjwX8B9THQQ_-f2_J8vPla06QP8-oZTcO2AFvIUAoTShM04gvurnDYetxPmuKiCF_imAWqt3jY5KjkomM';
 
 function b64urlToBytes(s) {
   const str = String(s || '').replace(/-/g, '+').replace(/_/g, '/');

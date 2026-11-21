@@ -10,7 +10,7 @@
   const PUSH_PREF = 'dobrota-push-pref-v1';
   const PUSH_PROMPT_SEEN = 'dobrota-push-prompt-v1';
   // Must match server DOBRO_VAPID_PUBLIC_KEY (base64url uncompressed P-256). Fill after keygen.
-  const VAPID_PUBLIC_KEY = '';
+  const VAPID_PUBLIC_KEY = 'BPJeqvTjwX8B9THQQ_-f2_J8vPla06QP8-oZTcO2AFvIUAoTShM04gvurnDYetxPmuKiCF_imAWqt3jY5KjkomM';
   const CATS = [
     { id: 'help', label: 'Помощь', points: 15, icon: 'help' },
     { id: 'family', label: 'Семья', points: 15, icon: 'family' },
