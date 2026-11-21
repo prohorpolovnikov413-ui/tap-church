@@ -293,12 +293,30 @@ const DOBRO_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 const DOBRO_VISION_FALLBACK = '@cf/llava-hf/llava-1.5-7b-hf';
 const DOBRO_PHASH_PREFIX = 'dobro:phash:';
 const DOBRO_CATS = {
-  smile: { id: 'smile', points: 5, label: 'Маленькая радость' },
-  help: { id: 'help', points: 15, label: 'Практическая помощь' },
-  care: { id: 'care', points: 25, label: 'Забота и внимание' },
-  big: { id: 'big', points: 50, label: 'Большое дело' },
-  volunteer: { id: 'volunteer', points: 80, label: 'Волонтёрство' }
+  help: { id: 'help', points: 15, label: 'Помощь' },
+  family: { id: 'family', points: 15, label: 'Семья' },
+  care: { id: 'care', points: 15, label: 'Забота' },
+  home: { id: 'home', points: 15, label: 'Дом' },
+  street: { id: 'street', points: 15, label: 'Улица' },
+  animals: { id: 'animals', points: 15, label: 'Животные' },
+  nature: { id: 'nature', points: 15, label: 'Природа' },
+  gift: { id: 'gift', points: 10, label: 'Подарок' },
+  time: { id: 'time', points: 20, label: 'Время' },
+  other: { id: 'other', points: 10, label: 'Другое' }
 };
+const DOBRO_CAT_ALIASES = {
+  smile: 'gift',
+  big: 'help',
+  volunteer: 'time'
+};
+function resolveDobroCat(raw) {
+  const key = DOBRO_CAT_ALIASES[raw] || raw;
+  return DOBRO_CATS[key] || null;
+}
+function publicDobroCategory(raw) {
+  const cat = resolveDobroCat(raw);
+  return cat ? cat.id : (raw || 'other');
+}
 
 function cleanDobroName(raw) {
   if (typeof raw !== 'string') return { ok: false, error: 'nick' };
@@ -574,7 +592,7 @@ function applyDobroApproval(st, userId, deedId, reason) {
       st.feed.unshift({
         id: cur.id,
         title: cur.title,
-        category: cur.category,
+        category: publicDobroCategory(cur.category),
         points: cur.points,
         createdAt: cur.createdAt,
         hasPhoto: true,
@@ -586,8 +604,9 @@ function applyDobroApproval(st, userId, deedId, reason) {
     }
     return { ok: true, already: true, deed: cur };
   }
-  const cat = DOBRO_CATS[cur.category];
+  const cat = resolveDobroCat(cur.category);
   const points = cur.awardPoints || (cat && cat.points) || 0;
+  if (cat) cur.category = cat.id;
   cur.status = 'approved';
   cur.reason = reason || 'Фото принято';
   cur.points = points;
@@ -602,7 +621,7 @@ function applyDobroApproval(st, userId, deedId, reason) {
     st.feed.unshift({
       id: cur.id,
       title: cur.title,
-      category: cur.category,
+      category: publicDobroCategory(cur.category),
       points: cur.points,
       createdAt: cur.createdAt,
       hasPhoto: true,
@@ -689,7 +708,7 @@ async function repairDobroFeed(kv, state) {
       state.feed.unshift({
         id: d.id,
         title: d.title,
-        category: d.category,
+        category: publicDobroCategory(d.category),
         points: d.points || 0,
         createdAt: d.createdAt,
         hasPhoto: true,
@@ -750,7 +769,7 @@ async function publicDobro(state, id, kv) {
     feed.push({
       id: item.id,
       title: item.title,
-      category: item.category,
+      category: publicDobroCategory(item.category),
       points: item.points,
       createdAt: item.createdAt,
       photoUrl,
@@ -766,7 +785,7 @@ async function publicDobro(state, id, kv) {
       deeds.push({
         id: d.id,
         title: d.title,
-        category: d.category,
+        category: publicDobroCategory(d.category),
         points: d.status === 'approved' || !d.status ? (d.points || 0) : 0,
         createdAt: d.createdAt,
         photoUrl: await resolveDeedPhotoUrl(kv, d),
@@ -969,7 +988,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
     const title = cleanDobroTitle(body.title);
     if (!title.ok) return json({ ok: false, error: 'title' }, 400, origin);
-    const cat = DOBRO_CATS[body.category];
+    const cat = resolveDobroCat(body.category);
     if (!cat) return json({ ok: false, error: 'category' }, 400, origin);
     const pic = parseDobroPhoto(body.photo);
     if (!pic.ok) {
@@ -1055,7 +1074,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       deed: {
         id: deed.id,
         title: deed.title,
-        category: deed.category,
+        category: publicDobroCategory(deed.category),
         points: 0,
         createdAt: deed.createdAt,
         photoUrl: pic.photo || null,
@@ -1092,7 +1111,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(photoData);
       const b64 = m ? m[1].replace(/\s+/g, '') : '';
       if (b64) {
-        const cat = DOBRO_CATS[cur.category] || { label: cur.category || '' };
+        const cat = resolveDobroCat(cur.category) || { label: cur.category || '' };
         const result = await verifyDobroPhoto(env, {
           title: cur.title || '',
           categoryLabel: cat.label || '',
@@ -1129,7 +1148,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       deed: {
         id: done.id,
         title: done.title,
-        category: done.category,
+        category: publicDobroCategory(done.category),
         points: done.points || 0,
         createdAt: done.createdAt,
         photoUrl: await resolveDeedPhotoUrl(env.KV, done),

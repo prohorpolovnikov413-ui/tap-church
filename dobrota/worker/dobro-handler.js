@@ -11,12 +11,26 @@
 import { verifyDeedPhoto, parsePhotoDataUrl } from './verify.js';
 
 const CATS = {
-  smile: { label: 'Маленькая радость', points: 5 },
-  help: { label: 'Практическая помощь', points: 15 },
-  care: { label: 'Забота и внимание', points: 25 },
-  big: { label: 'Большое дело', points: 50 },
-  volunteer: { label: 'Волонтёрство', points: 80 },
+  help: { id: 'help', label: 'Помощь', points: 15 },
+  family: { id: 'family', label: 'Семья', points: 15 },
+  care: { id: 'care', label: 'Забота', points: 15 },
+  home: { id: 'home', label: 'Дом', points: 15 },
+  street: { id: 'street', label: 'Улица', points: 15 },
+  animals: { id: 'animals', label: 'Животные', points: 15 },
+  nature: { id: 'nature', label: 'Природа', points: 15 },
+  gift: { id: 'gift', label: 'Подарок', points: 10 },
+  time: { id: 'time', label: 'Время', points: 20 },
+  other: { id: 'other', label: 'Другое', points: 10 },
 };
+const CAT_ALIASES = { smile: 'gift', big: 'help', volunteer: 'time' };
+function resolveCat(raw) {
+  const key = CAT_ALIASES[raw] || raw;
+  return CATS[key] || null;
+}
+function publicCategory(raw) {
+  const cat = resolveCat(raw);
+  return cat ? cat.id : (raw || 'other');
+}
 
 const USER_KEY = (id) => 'dobro:u:' + id;
 const DEEDS_KEY = 'dobro:deeds:v1';
@@ -69,7 +83,7 @@ function publicDeed(d, viewerId) {
   return {
     id: d.id,
     title: d.title,
-    category: d.category,
+    category: publicCategory(d.category),
     points: d.status === 'approved' ? d.points : 0,
     createdAt: d.createdAt,
     photoUrl: d.photoUrl || null,
@@ -173,7 +187,7 @@ export async function handleDobro(request, env, ctx, origin) {
     const name = cleanName(body?.name || '') || 'Участник';
     const title = typeof body?.title === 'string' ? body.title.trim().slice(0, 160) : '';
     const category = typeof body?.category === 'string' ? body.category : '';
-    const cat = CATS[category];
+    const cat = resolveCat(category);
     if (!id) return json({ ok: false, error: 'id' }, 400, origin);
     if (title.length < 3) return json({ ok: false, error: 'title', errorText: 'Опишите дело чуть подробнее' }, 400, origin);
     if (!cat) return json({ ok: false, error: 'category', errorText: 'Выберите категорию' }, 400, origin);
@@ -192,7 +206,7 @@ export async function handleDobro(request, env, ctx, origin) {
       userId: id,
       authorName: name,
       title,
-      category,
+      category: cat.id,
       points: cat.points,
       photoUrl: photoCheck.dataUrl,
       status: 'pending',

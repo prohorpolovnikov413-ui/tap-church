@@ -8,13 +8,47 @@
   const LIKES_STORE = 'dobrota-likes-v1';
   const FRIENDS_STORE = 'dobrota-friends-v1';
   const CATS = [
-    { id: 'smile', label: 'Радость', hint: '', points: 5 },
-    { id: 'help', label: 'Помощь', hint: '', points: 15 },
-    { id: 'care', label: 'Забота', hint: '', points: 25 },
-    { id: 'big', label: 'Большое', hint: '', points: 50 },
-    { id: 'volunteer', label: 'Волонтёр', hint: '', points: 80 }
+    { id: 'help', label: 'Помощь', points: 15, icon: 'help' },
+    { id: 'family', label: 'Семья', points: 15, icon: 'family' },
+    { id: 'care', label: 'Забота', points: 15, icon: 'care' },
+    { id: 'home', label: 'Дом', points: 15, icon: 'home' },
+    { id: 'street', label: 'Улица', points: 15, icon: 'street' },
+    { id: 'animals', label: 'Животные', points: 15, icon: 'animals' },
+    { id: 'nature', label: 'Природа', points: 15, icon: 'nature' },
+    { id: 'gift', label: 'Подарок', points: 10, icon: 'gift' },
+    { id: 'time', label: 'Время', points: 20, icon: 'time' },
+    { id: 'other', label: 'Другое', points: 10, icon: 'other' }
   ];
+  // Old category ids → new (display + submit normalize)
+  const CAT_ALIASES = { smile: 'gift', big: 'help', volunteer: 'time' };
   const LABELS = Object.fromEntries(CATS.map((c) => [c.id, c.label]));
+  LABELS.smile = 'Подарок';
+  LABELS.big = 'Помощь';
+  LABELS.volunteer = 'Время';
+  function normalizeCat(id) {
+    const raw = String(id || '');
+    const mapped = CAT_ALIASES[raw] || raw;
+    return CATS.some((c) => c.id === mapped) ? mapped : 'other';
+  }
+  function catMeta(id) {
+    const nid = normalizeCat(id);
+    return CATS.find((c) => c.id === nid) || CATS[CATS.length - 1];
+  }
+  function catIconSvg(name) {
+    const paths = {
+      help: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M6.2 6.2l2.1 2.1M15.7 15.7l2.1 2.1M17.8 6.2l-2.1 2.1M8.3 15.7l-2.1 2.1"/><circle cx="12" cy="12" r="3.2"/>',
+      family: '<circle cx="9" cy="9" r="2.4"/><circle cx="15" cy="9" r="2.4"/><path d="M4.5 19c.6-3 2.8-4.5 5.5-4.5S15 16 15.5 19M13 14.5c1.4-.4 3-.2 4.5 1.2.6.6 1 1.5 1.2 2.3"/>',
+      care: '<path d="M12 20s-7-4.4-9.2-8.2C1.2 9.2 2.8 6 6 6c1.8 0 3.1 1 3.9 2.1C10.7 7 12 6 13.8 6c3.2 0 4.8 3.2 3.2 5.8C19 15.6 12 20 12 20z"/>',
+      home: '<path d="M4 11.5 12 5l8 6.5V20H4v-8.5z"/><path d="M10 20v-6h4v6"/>',
+      street: '<path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-5h6v5M12 4v5"/>',
+      animals: '<circle cx="9" cy="13" r="3.2"/><circle cx="16.5" cy="11.5" r="2.4"/><path d="M6.2 9.2 4.8 6.8M11.8 9.2l1.2-2.4M14.6 8.4l-.2-2.6M18.8 9l1.4-2.2"/>',
+      nature: '<path d="M12 20V10"/><path d="M12 14c-3.5 0-6-2.2-6-5 3.2 0 6 2 6 5z"/><path d="M12 16c3.2 0 6-2.2 6-5-3 0-6 2-6 5z"/><path d="M8 20h8"/>',
+      gift: '<path d="M5 10h14v10H5V10z"/><path d="M12 10v10M5 14h14"/><path d="M12 10c-2.2 0-3.5-1.6-3.5-3S10 5 12 7c2-2 3.5-.6 3.5 0S14.2 10 12 10z"/>',
+      time: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5.5l3.2 2"/>',
+      other: '<circle cx="7" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="17" cy="12" r="1.4"/>'
+    };
+    return `<svg class="cat-ico" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.other}</svg>`;
+  }
   const DAILY_IDEAS = [
     'Помоги соседу с сумками', 'Позвони близкому человеку', 'Оставь добрую записку незнакомцу',
     'Уступи место в транспорте', 'Покорми бездомное животное', 'Подари улыбку кассиру',
@@ -57,6 +91,7 @@
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), app = $('app');
   let user = null, photo = null, category = 'help', busy = false, prevTab = 'feed';
+  category = normalizeCat(category);
   let hasPin = false, pendingSync = '';
   let lastState = null, feedFilter = 'all', reducedMotion = false;
   try { reducedMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); } catch {}
@@ -344,21 +379,22 @@
 
   function renderCats() {
     const box = $('cats');
-    box.innerHTML = '<legend class="lbl">Категория</legend>' + CATS.map((c) => `
+    box.innerHTML = '<legend class="lbl">Тип</legend><div class="cat-grid">' + CATS.map((c) => `
       <label class="cat${c.id === category ? ' on' : ''}">
         <input type="radio" name="category" value="${c.id}" ${c.id === category ? 'checked' : ''}>
-        <div class="row"><span>${esc(c.label)}</span><span class="pts">+${c.points}</span></div>
-      </label>`).join('');
+        <span class="cat-main">${catIconSvg(c.icon)}<span class="cat-label">${esc(c.label)}</span></span>
+        <span class="pts">+${c.points}</span>
+      </label>`).join('') + '</div>';
     box.querySelectorAll('input').forEach((inp) => {
       inp.addEventListener('change', () => {
-        category = inp.value;
+        category = normalizeCat(inp.value);
         renderCats();
         updateAddLabel();
       });
     });
   }
   function updateAddLabel() {
-    const c = CATS.find((x) => x.id === category);
+    const c = catMeta(category);
     $('btn-add').textContent = busy ? '…' : `Добавить · +${c.points}`;
   }
 
@@ -494,7 +530,7 @@
             ${authorLvl ? `<span class="lvl">${esc(authorLvl)}</span>` : ''}
           </div>
           <p class="ig-title">${esc(item.title)}</p>
-          <p class="ig-sub">${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
+          <p class="ig-sub"><span class="ig-cat">${catIconSvg(catMeta(item.category).icon)}${esc(catMeta(item.category).label)}</span> · +${item.points || 0}</p>
           <div class="ig-actions">
             <button type="button" class="heart-btn${liked ? ' on' : ''}" data-like="${esc(fid)}" data-author="${esc(item.authorId || item.authorName || '')}" aria-label="Нравится">
               <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.1C.7 9.7 2.2 6 5.6 6c1.9 0 3.2 1.1 4 2.2C10.4 7.1 11.7 6 13.6 6c3.4 0 4.9 3.7 2.9 6.9C18.7 16.7 12 21 12 21z"/></svg>
@@ -576,7 +612,7 @@
         ${d.photoUrl ? `<img class="thumb" src="${esc(d.photoUrl)}" alt="">` : ''}
         <div class="grow">
           <p>${esc(d.title)}</p>
-          <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p>
+          <p class="muted" style="font-weight:400">${esc(catMeta(d.category).label)} · ${esc(formatDate(d.createdAt))}</p>
           <div class="status-row">${statusBadge(d.status, d.reason)}${
             isRecoverableDeed(d)
               ? `<button type="button" class="btn btn-ghost recover-deed" data-deed-id="${d.id}">OK</button>`
@@ -857,7 +893,7 @@
           id: user.id,
           name: user.name,
           title: $('title').value,
-          category,
+          category: normalizeCat(category),
           photo
         })
       });
