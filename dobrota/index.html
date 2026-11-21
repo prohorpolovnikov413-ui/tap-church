@@ -173,6 +173,16 @@
           </form>
         </div>
 
+        <div class="profile-block" id="push-block">
+          <h3 class="profile-h3">Напоминания</h3>
+          <label class="push-toggle">
+            <input type="checkbox" id="push-enabled">
+            <span>Ежедневно в 19:00</span>
+          </label>
+          <p class="muted quiet" id="push-hint">Если нет доброго дела за день</p>
+          <p class="muted quiet ios-push-hint hidden" id="push-ios-hint">Добавьте на экран Домой</p>
+        </div>
+
         <div class="profile-block syncbox">
           <h3 class="profile-h3">Ссылка входа</h3>
           <div class="synclink">
@@ -184,6 +194,14 @@
 
         <button type="button" class="btn btn-ghost rules-profile-btn" id="btn-rules-profile">Правила</button>
       </section>
+
+      <div id="push-prompt" class="push-prompt hidden" role="dialog" aria-live="polite">
+        <p>Напоминать о добром деле в 19:00?</p>
+        <div class="push-prompt-actions">
+          <button type="button" class="btn" id="push-prompt-yes">Да</button>
+          <button type="button" class="btn btn-ghost" id="push-prompt-no">Не сейчас</button>
+        </div>
+      </div>
 
       <section id="panel-rules" class="panel panel-rules" data-title="Правила" hidden>
         <div class="rules-hero">

@@ -6,5 +6,8 @@
   "observability": { "enabled": true, "traces": { "enabled": true } },
   "kv_namespaces": [
     { "binding": "KV", "id": "1d9363290f8f40c3b81581f1680fdbab" }
-  ]
+  ],
+  "triggers": {
+    "crons": ["0 16 * * *"]
+  }
 }

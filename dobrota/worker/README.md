@@ -23,10 +23,30 @@
 | POST | `/dobro/set-pin` | задать/сменить PIN |
 | POST | `/dobro/sync/*` | личная ссылка `?sync=` |
 
+## Web Push (ежедневно 19:00 MSK)
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| POST | `/dobro/push/subscribe` | сохранить PushSubscription |
+| POST | `/dobro/push/unsubscribe` | удалить подписку |
+| cron | `0 16 * * *` | 16:00 UTC = 19:00 Europe/Moscow |
+
+Секреты Worker (не коммитить):
+- `VAPID_PRIVATE_KEY` — JWK JSON `{"kty":"EC","crv":"P-256","d":"...","x":"...","y":"..."}` или голый base64url `d`
+- `VAPID_SUBJECT` — например `mailto:you@example.com`
+
+Публичный ключ (base64url, uncompressed P-256) вписать в:
+- `server/worker.js` → `DOBRO_VAPID_PUBLIC_KEY`
+- `dobrota/app.js` → `VAPID_PUBLIC_KEY`
+
+KV: `dobro:push:users` (индекс id), `dobro:push:u:{id}` (подписки). Мёртвые endpoint’ы (404/410) удаляются. Пишет в KV только при изменении.
+
 ## Деплой (вручную)
 
 ```bash
 cd server
+npx wrangler secret put VAPID_PRIVATE_KEY
+npx wrangler secret put VAPID_SUBJECT
 npx wrangler deploy
 ```
 

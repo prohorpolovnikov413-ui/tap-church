@@ -1,4 +1,4 @@
-const CACHE = 'dobrota-v16';
+const CACHE = 'dobrota-v17';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,7 +16,6 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (url.origin !== location.origin) return;
 
-  // Navigations / HTML: network first so shell updates reach users quickly.
   const isNav = e.request.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
   if (isNav) {
     e.respondWith(
@@ -38,6 +37,42 @@ self.addEventListener('fetch', (e) => {
         caches.open(CACHE).then((c) => c.put(e.request, copy));
       }
       return res;
-    }).catch(() => cached))
+    }))
+  );
+});
+
+self.addEventListener('push', (event) => {
+  let data = { title: 'Доброта', body: 'Пора сделать доброе дело', url: './?tab=add', tag: 'dobrota-daily' };
+  try {
+    if (event.data) data = Object.assign(data, event.data.json());
+  } catch {
+    try { data.body = event.data.text(); } catch {}
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Доброта', {
+      body: data.body || '',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      tag: data.tag || 'dobrota-daily',
+      renotify: true,
+      data: { url: data.url || './?tab=add' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './?tab=add';
+  const abs = new URL(target, self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const c of clients) {
+        if ('focus' in c) {
+          c.navigate(abs).catch(() => {});
+          return c.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(abs);
+    })
   );
 });
