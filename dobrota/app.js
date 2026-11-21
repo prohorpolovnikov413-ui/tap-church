@@ -8,11 +8,11 @@
   const LIKES_STORE = 'dobrota-likes-v1';
   const FRIENDS_STORE = 'dobrota-friends-v1';
   const CATS = [
-    { id: 'smile', label: 'Маленькая радость', hint: 'улыбка, комплимент, тёплое слово', points: 5 },
-    { id: 'help', label: 'Практическая помощь', hint: 'помог с сумками, делом, дорогой', points: 15 },
-    { id: 'care', label: 'Забота и внимание', hint: 'выслушал, поддержал, утешил', points: 25 },
-    { id: 'big', label: 'Большое дело', hint: 'серьёзная помощь человеку', points: 50 },
-    { id: 'volunteer', label: 'Волонтёрство', hint: 'время и силы ради других', points: 80 }
+    { id: 'smile', label: 'Радость', hint: '', points: 5 },
+    { id: 'help', label: 'Помощь', hint: '', points: 15 },
+    { id: 'care', label: 'Забота', hint: '', points: 25 },
+    { id: 'big', label: 'Большое', hint: '', points: 50 },
+    { id: 'volunteer', label: 'Волонтёр', hint: '', points: 80 }
   ];
   const LABELS = Object.fromEntries(CATS.map((c) => [c.id, c.label]));
   const DAILY_IDEAS = [
@@ -38,20 +38,20 @@
     'Отправь стикер «ты молодец»', 'Помоги соседу завести машину', 'Сделай сюрприз без повода'
   ];
   const LEVELS = [
-    { min: 0, name: 'Помощник', hint: 'Первые шаги в добре' },
-    { min: 3, name: 'Добрый сосед', hint: 'Вас уже замечают рядом' },
-    { min: 7, name: 'Тёплый свет', hint: 'Ваши дела согревают' },
-    { min: 15, name: 'Свет', hint: 'Вы вдохновляете других' },
-    { min: 30, name: 'Сердце двора', hint: 'Опора для многих' },
-    { min: 50, name: 'Добрый маяк', hint: 'Ваш пример виден издалека' }
+    { min: 0, name: 'Помощник', hint: '' },
+    { min: 3, name: 'Сосед', hint: '' },
+    { min: 7, name: 'Свет', hint: '' },
+    { min: 15, name: 'Опора', hint: '' },
+    { min: 30, name: 'Маяк', hint: '' },
+    { min: 50, name: 'Сердце', hint: '' }
   ];
   const BADGES = [
-    { id: 'first', name: 'Первое дело', need: 1, desc: 'Одно принятое дело' },
-    { id: 'streak3', name: 'Искра', needStreak: 3, desc: '3 дня подряд' },
-    { id: 'streak7', name: 'Неделя тепла', needStreak: 7, desc: '7 дней подряд · бонус' },
-    { id: 'streak30', name: 'Месяц добра', needStreak: 30, desc: '30 дней подряд · бонус' },
-    { id: 'ten', name: 'Десятка', need: 10, desc: '10 принятых дел' },
-    { id: 'photo5', name: 'В кадре', needPhotos: 5, desc: '5 дел с фото в ленте' }
+    { id: 'first', name: 'Первое', need: 1, desc: '' },
+    { id: 'streak3', name: 'Искра', needStreak: 3, desc: '' },
+    { id: 'streak7', name: 'Неделя', needStreak: 7, desc: '' },
+    { id: 'streak30', name: 'Месяц', needStreak: 30, desc: '' },
+    { id: 'ten', name: 'Десятка', need: 10, desc: '' },
+    { id: 'photo5', name: 'В кадре', needPhotos: 5, desc: '' }
   ];
 
   const $ = (id) => document.getElementById(id);
@@ -344,11 +344,10 @@
 
   function renderCats() {
     const box = $('cats');
-    box.innerHTML = '<legend class="lbl">Категория и баллы</legend>' + CATS.map((c) => `
+    box.innerHTML = '<legend class="lbl">Категория</legend>' + CATS.map((c) => `
       <label class="cat${c.id === category ? ' on' : ''}">
         <input type="radio" name="category" value="${c.id}" ${c.id === category ? 'checked' : ''}>
         <div class="row"><span>${esc(c.label)}</span><span class="pts">+${c.points}</span></div>
-        <p>${esc(c.hint)}</p>
       </label>`).join('');
     box.querySelectorAll('input').forEach((inp) => {
       inp.addEventListener('change', () => {
@@ -360,7 +359,7 @@
   }
   function updateAddLabel() {
     const c = CATS.find((x) => x.id === category);
-    $('btn-add').textContent = busy ? 'Проверяем…' : `Добавить · +${c.points}`;
+    $('btn-add').textContent = busy ? '…' : `Добавить · +${c.points}`;
   }
 
   function isRecoverableDeed(d) {
@@ -452,13 +451,9 @@
     const label = $('pin-new-label');
     const submit = $('pin-submit');
     if (oldWrap) oldWrap.classList.toggle('hidden', !hasPin);
-    if (hint) {
-      hint.textContent = hasPin
-        ? 'PIN уже задан. Чтобы сменить — введите текущий и новый.'
-        : 'Задайте PIN из 4 цифр, чтобы входить с другого устройства по имени.';
-    }
-    if (label) label.textContent = hasPin ? 'Новый PIN (4 цифры)' : 'PIN (4 цифры)';
-    if (submit) submit.textContent = hasPin ? 'Сменить PIN' : 'Сохранить PIN';
+    if (hint) hint.textContent = '';
+    if (label) label.textContent = hasPin ? 'Новый' : 'PIN';
+    if (submit) submit.textContent = hasPin ? 'Сменить' : 'Сохранить';
   }
 
   function filterFeed(items) {
@@ -482,7 +477,7 @@
     const list = filterFeed(feed);
     const box = $('feed-list');
     if (!list.length) {
-      box.innerHTML = '<p class="muted" style="margin-top:1rem;padding:1rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока пусто в этом фильтре — добавьте дело с фото или смените фильтр.</p>';
+      box.innerHTML = '<p class="muted empty-hint">Пусто</p>';
       return;
     }
     box.innerHTML = `<div class="feed">${list.map((item) => {
@@ -503,14 +498,13 @@
           <div class="ig-actions">
             <button type="button" class="heart-btn${liked ? ' on' : ''}" data-like="${esc(fid)}" data-author="${esc(item.authorId || item.authorName || '')}" aria-label="Нравится">
               <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.1C.7 9.7 2.2 6 5.6 6c1.9 0 3.2 1.1 4 2.2C10.4 7.1 11.7 6 13.6 6c3.4 0 4.9 3.7 2.9 6.9C18.7 16.7 12 21 12 21z"/></svg>
-              <span>${liked ? 'Нравится' : 'Отклик'}</span>
             </button>
           </div>
         </div>
       </article>`;
     }).join('')}</div>`;
     box.querySelectorAll('.heart-btn').forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
+      btn.addEventListener('click', () => {
         const id = btn.getAttribute('data-like');
         const author = btn.getAttribute('data-author');
         const on = toggleLike(id, author);
@@ -518,7 +512,6 @@
         btn.classList.remove('pop');
         void btn.offsetWidth;
         btn.classList.add('pop');
-        btn.querySelector('span').textContent = on ? 'Нравится' : 'Отклик';
         const r = btn.getBoundingClientRect();
         floatHeartAt(r.left + r.width / 2, r.top);
       });
@@ -531,17 +524,9 @@
     const photos = (deeds || []).filter((d) => (d.status || 'approved') === 'approved' && d.photoUrl).length;
     const lvl = levelFor(count);
     const sc = $('streak-count');
-    if (sc) sc.textContent = `Серия: ${streak} ${streak === 1 ? 'день' : (streak >= 2 && streak <= 4 ? 'дня' : 'дней')}`;
-    const sh = $('streak-hint');
-    if (sh) {
-      if (streak >= 30) sh.textContent = 'Бонус 30 дней: вы на вершине постоянства.';
-      else if (streak >= 7) sh.textContent = 'Бонус 7 дней открыт. До месяца — ещё немного.';
-      else sh.textContent = 'Отмечайте добрые дела каждый день. Бонусы на 7 и 30 днях.';
-    }
+    if (sc) sc.textContent = `${streak} ${streak === 1 ? 'день' : (streak >= 2 && streak <= 4 ? 'дня' : 'дней')}`;
     const lb = $('level-badge');
     if (lb) lb.textContent = lvl.name;
-    const lh = $('level-hint');
-    if (lh) lh.textContent = `${lvl.hint} · ${count} ${deedsWord(count)}`;
     const grid = $('badges-grid');
     if (grid) {
       grid.innerHTML = BADGES.map((b) => {
@@ -549,7 +534,7 @@
         if (b.need != null) on = count >= b.need;
         if (b.needStreak != null) on = streak >= b.needStreak;
         if (b.needPhotos != null) on = photos >= b.needPhotos;
-        return `<div class="badge-chip${on ? ' on' : ' locked'}"><strong>${esc(b.name)}</strong><span>${esc(b.desc)}</span></div>`;
+        return `<div class="badge-chip${on ? ' on' : ' locked'}"><strong>${esc(b.name)}</strong></div>`;
       }).join('');
     }
   }
@@ -563,11 +548,11 @@
     }
     const lvl = levelFor(me.deedCount || 0);
     $('nick').value = me.name || user.name;
-    $('me-line').innerHTML = `У вас сейчас <strong>${me.totalPoints}</strong> баллов и <strong>${me.deedCount}</strong> ${deedsWord(me.deedCount)} · <span style="color:var(--gold)">${esc(lvl.name)}</span>`;
+    $('me-line').innerHTML = `<strong>${me.totalPoints}</strong> · ${me.deedCount} · <span style="color:var(--warm)">${esc(lvl.name)}</span>`;
     const chip = $('me-chip');
-    if (chip) chip.textContent = `${me.name || user.name} · ${lvl.name} · ${me.totalPoints} б.`;
+    if (chip) chip.textContent = `${me.name || user.name} · ${me.totalPoints}`;
     const note = $('profile-note');
-    if (note) note.textContent = `${me.totalPoints} баллов · ${me.deedCount} ${deedsWord(me.deedCount)} · уровень «${lvl.name}»`;
+    if (note) note.textContent = `${me.totalPoints} · ${me.deedCount} · ${lvl.name}`;
 
     renderDaily();
     renderFeedList(data.feed || []);
@@ -578,11 +563,11 @@
       return `
       <li class="${e.isYou ? 'you' : ''}">
         <span class="rank">${e.rank}</span>
-        <div class="grow"><p>${esc(e.name)}${e.isYou ? ' <span class="muted">это вы</span>' : ''} <span class="lvl" style="font-size:.65rem;margin-left:.25rem">${esc(bl.name)}</span></p>
-        <p class="muted" style="font-weight:400">${e.deedCount} ${deedsWord(e.deedCount)}</p></div>
+        <div class="grow"><p>${esc(e.name)}${e.isYou ? ' <span class="muted">вы</span>' : ''} <span class="lvl" style="font-size:.65rem;margin-left:.25rem">${esc(bl.name)}</span></p>
+        <p class="muted" style="font-weight:400">${e.deedCount}</p></div>
         <span class="pts-lg">${e.totalPoints}</span>
       </li>`;
-    }).join('') : '<li class="muted">Пока пусто — будьте первым, кто отметит доброе дело.</li>';
+    }).join('') : '<li class="muted">Пусто</li>';
 
     const deeds = data.deeds || [];
     renderRewards(deeds, me);
@@ -594,12 +579,12 @@
           <p class="muted" style="font-weight:400">${esc(LABELS[d.category] || d.category)} · ${esc(formatDate(d.createdAt))}</p>
           <div class="status-row">${statusBadge(d.status, d.reason)}${
             isRecoverableDeed(d)
-              ? `<button type="button" class="btn btn-ghost recover-deed" data-deed-id="${d.id}">Принять</button>`
+              ? `<button type="button" class="btn btn-ghost recover-deed" data-deed-id="${d.id}">OK</button>`
               : ''
           }</div>
         </div>
         <span class="pts-sm">${d.status === 'rejected' || d.status === 'pending' || d.status === 'error' ? '—' : '+' + (d.points || 0)}</span>
-      </li>`).join('') : '<li class="muted">Записей ещё нет — добавьте первое дело с фото.</li>';
+      </li>`).join('') : '<li class="muted">Пусто</li>';
     $('hist-list').querySelectorAll('.recover-deed').forEach((btn) => {
       btn.addEventListener('click', () => recoverDeed(Number(btn.getAttribute('data-deed-id')), btn));
     });
@@ -618,7 +603,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: user.id, deedId })
       });
-      show($('flash'), `Принято · +${(data.deed && data.deed.points) || 0} баллов`, true, 'ok');
+      show($('flash'), `+${(data.deed && data.deed.points) || 0}`, true, 'ok');
       burstConfetti();
       await loadAll();
     } catch (e) {
@@ -665,9 +650,9 @@
     if (log) log.classList.toggle('hidden', mode !== 'login');
     if (syn) syn.classList.toggle('hidden', mode !== 'sync');
     if (sub) {
-      if (mode === 'login') sub.textContent = 'Войдите в существующий аккаунт по имени и PIN.';
-      else if (mode === 'sync') sub.textContent = 'Восстановление аккаунта по личной ссылке.';
-      else sub.textContent = 'Создайте аккаунт: имя в рейтинге и PIN из 4 цифр. На этом устройстве вход сохранится.';
+      if (mode === 'login') sub.textContent = 'Имя и PIN';
+      else if (mode === 'sync') sub.textContent = 'Вход по ссылке';
+      else sub.textContent = 'Имя и PIN · вход сохранится';
     }
     show($('gate-err'), '', false);
     show($('login-err'), '', false);
@@ -880,12 +865,12 @@
       clearPhoto();
       const st = data.deed && data.deed.status;
       if (st === 'pending' || !st) {
-        show($('flash'), 'Отправлено · фото проверяется…', true, 'ok');
+        show($('flash'), 'Проверка…', true, 'ok');
       } else if (st === 'approved') {
-        show($('flash'), `✅ Принято · +${data.deed.points} баллов`, true, 'ok');
+        show($('flash'), `+${data.deed.points}`, true, 'ok');
         burstConfetti();
       } else {
-        show($('flash'), `❌ Отклонено: ${(data.deed && data.deed.reason) || 'фото не подошло'}`, true, 'err');
+        show($('flash'), (data.deed && data.deed.reason) || 'Нет', true, 'err');
       }
       setTab('history');
       await loadAll();
@@ -910,7 +895,7 @@
         body: JSON.stringify({ id: user.id, name: $('nick').value })
       });
       await saveUser({ id: user.id, name: data.name || $('nick').value.trim() });
-      show($('flash'), 'Имя в рейтинге обновлено', true);
+      show($('flash'), 'Сохранено', true);
       await loadAll();
     } catch (e) {
       show($('error'), e.message || 'Ошибка', true);
@@ -947,7 +932,7 @@
       updatePinUi();
       $('pin-new').value = '';
       $('pin-old').value = '';
-      show($('flash'), 'PIN сохранён', true);
+      show($('flash'), 'OK', true);
     } catch (e) {
       show($('error'), e.message || 'Не удалось сохранить PIN', true);
     } finally {
@@ -968,7 +953,7 @@
       });
       const url = location.origin + location.pathname.replace(/\/?$/, '/') + '?sync=' + encodeURIComponent(data.token);
       $('sync-url').value = url;
-      show($('flash'), 'Ссылка готова — откройте её на другом устройстве', true);
+      show($('flash'), 'Готово', true);
     } catch (e) {
       show($('error'), e.message || 'Не удалось создать ссылку', true);
     } finally {
@@ -985,7 +970,7 @@
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      show($('flash'), 'Ссылка скопирована', true);
+      show($('flash'), 'Скопировано', true);
     } catch {
       $('sync-url').select();
       show($('flash'), 'Скопируйте ссылку вручную', true);
@@ -1030,7 +1015,7 @@
         const info = await api('/dobro/sync/info?token=' + encodeURIComponent(syncToken));
         const hint = $('sync-restore-hint');
         if (hint && info.name) {
-          hint.textContent = 'Ссылка ведёт в аккаунт «' + info.name + '». Подтвердите вход на этом устройстве.';
+          hint.textContent = '«' + info.name + '»';
         }
       } catch (e) {
         show($('sync-err'), e.message || 'Ссылка недействительна', true);
