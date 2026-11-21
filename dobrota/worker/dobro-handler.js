@@ -90,6 +90,7 @@ function publicDeed(d, viewerId) {
     status: d.status || 'approved',
     reason: d.reason || '',
     authorName: d.authorName,
+    authorId: d.userId || '',
     isYou: d.userId === viewerId,
   };
 }

@@ -292,6 +292,11 @@
     layer.appendChild(el);
     setTimeout(() => el.remove(), 1000);
   }
+  function maybeOpenCamera() {
+    if (!rulesSeen()) return;
+    if (photo) return;
+    try { $('cam').click(); } catch {}
+  }
   function renderDaily() {
     const idea = dailyIdea();
     const title = $('daily-title');
@@ -301,8 +306,7 @@
       btn.onclick = () => {
         $('title').value = idea;
         setTab('add');
-        // One-tap camera prompt after short delay
-        setTimeout(() => { try { $('cam').click(); } catch {} }, 280);
+        setTimeout(maybeOpenCamera, 280);
       };
     }
   }
@@ -491,6 +495,7 @@
   function closeRules() {
     markRulesSeen();
     setTab(prevTab === 'rules' ? 'add' : prevTab || 'add');
+    setTimeout(maybeOpenCamera, 240);
   }
 
   function updatePinUi() {
@@ -863,15 +868,11 @@
   $('cam').onchange = (e) => onPick(e.target.files && e.target.files[0]);
   $('gal').onchange = (e) => onPick(e.target.files && e.target.files[0]);
 
-  // Big FAB: open add tab and launch camera in one gesture
+  // Big FAB: open add tab and launch camera (only after rules already seen)
   const tabAdd = $('tab-add');
   if (tabAdd) {
     tabAdd.addEventListener('click', () => {
-      setTimeout(() => {
-        if (!photo) {
-          try { $('cam').click(); } catch {}
-        }
-      }, 220);
+      setTimeout(maybeOpenCamera, 220);
     });
   }
 
@@ -1061,28 +1062,44 @@
     const syncToken = (params.get('sync') || '').trim();
 
     user = await loadUserDurable();
-    if (validLocalUser(user)) {
-      await saveUser(user); // refresh all stores
-      if (syncToken) {
-        // Already logged in — ignore sync or offer? Prefer keep current session, strip sync
-        stripSyncFromUrl();
-      }
-      await enterApp(okTab);
-      return;
-    }
 
+    // ?sync= must work even if a local session/cookie already exists (other device / switch account)
     if (syncToken) {
       pendingSync = syncToken;
-      showGate('sync');
       try {
         const info = await api('/dobro/sync/info?token=' + encodeURIComponent(syncToken));
-        const hint = $('sync-restore-hint');
-        if (hint && info.name) {
-          hint.textContent = '«' + info.name + '»';
+        const same = validLocalUser(user) && info && info.id && user.id === info.id;
+        if (same) {
+          await saveUser(user);
+          stripSyncFromUrl();
+          pendingSync = '';
+          await enterApp(okTab);
+          return;
         }
+        // Auto-claim when opening a sync link (one-tap restore / switch)
+        const data = await api('/dobro/sync/claim', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token: syncToken })
+        });
+        hasPin = !!data.hasPin;
+        await saveUser({ id: data.id, name: data.name || (info && info.name) || 'Участник' });
+        pendingSync = '';
+        stripSyncFromUrl();
+        await enterApp(okTab);
+        return;
       } catch (e) {
+        showGate('sync');
+        const hint = $('sync-restore-hint');
+        if (hint) hint.textContent = 'Подтвердите вход';
         show($('sync-err'), e.message || 'Ссылка недействительна', true);
+        return;
       }
+    }
+
+    if (validLocalUser(user)) {
+      await saveUser(user); // refresh all stores
+      await enterApp(okTab);
       return;
     }
 
