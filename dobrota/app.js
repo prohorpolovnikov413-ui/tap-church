@@ -21,6 +21,11 @@
   ];
   // Old category ids → new (display + submit normalize)
   const CAT_ALIASES = { smile: 'gift', big: 'help', volunteer: 'time' };
+  // Wire fallback if live Worker is still on pre-#12 category set
+  const CAT_WIRE_LEGACY = {
+    help: 'help', family: 'care', care: 'care', home: 'help', street: 'help',
+    animals: 'care', nature: 'smile', gift: 'smile', time: 'volunteer', other: 'smile'
+  };
   const LABELS = Object.fromEntries(CATS.map((c) => [c.id, c.label]));
   LABELS.smile = 'Подарок';
   LABELS.big = 'Помощь';
@@ -29,6 +34,13 @@
     const raw = String(id || '');
     const mapped = CAT_ALIASES[raw] || raw;
     return CATS.some((c) => c.id === mapped) ? mapped : 'other';
+  }
+  function wireCategory(id) {
+    return normalizeCat(id);
+  }
+  function wireCategoryLegacy(id) {
+    const nid = normalizeCat(id);
+    return CAT_WIRE_LEGACY[nid] || 'help';
   }
   function catMeta(id) {
     const nid = normalizeCat(id);
@@ -886,17 +898,32 @@
     show($('error'), '', false);
     show($('flash'), '', false);
     try {
-      const data = await api('/dobro/deed', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: user.id,
-          name: user.name,
-          title: $('title').value,
-          category: normalizeCat(category),
-          photo
-        })
-      });
+      const titleVal = $('title').value;
+      const catId = wireCategory(category);
+      const payload = {
+        id: user.id,
+        name: user.name,
+        title: titleVal,
+        category: catId,
+        photo
+      };
+      let data;
+      try {
+        data = await api('/dobro/deed', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (firstErr) {
+        // Live Worker may still reject new ids until redeploy — retry with legacy ids
+        const legacy = wireCategoryLegacy(catId);
+        if (legacy === catId || !/категор/i.test(String(firstErr && firstErr.message || ''))) throw firstErr;
+        data = await api('/dobro/deed', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, payload, { category: legacy }))
+        });
+      }
       $('title').value = '';
       clearPhoto();
       const st = data.deed && data.deed.status;

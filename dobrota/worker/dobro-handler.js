@@ -190,7 +190,9 @@ export async function handleDobro(request, env, ctx, origin) {
     const cat = resolveCat(category);
     if (!id) return json({ ok: false, error: 'id' }, 400, origin);
     if (title.length < 3) return json({ ok: false, error: 'title', errorText: 'Опишите дело чуть подробнее' }, 400, origin);
-    if (!cat) return json({ ok: false, error: 'category', errorText: 'Выберите категорию' }, 400, origin);
+    if (!cat) {
+      return json({ ok: false, error: 'category', errorText: 'Выберите категорию' }, 400, origin);
+    }
 
     const photoCheck = parsePhotoDataUrl(body?.photo);
     if (!photoCheck.ok) {

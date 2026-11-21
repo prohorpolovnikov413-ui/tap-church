@@ -989,7 +989,13 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     const title = cleanDobroTitle(body.title);
     if (!title.ok) return json({ ok: false, error: 'title' }, 400, origin);
     const cat = resolveDobroCat(body.category);
-    if (!cat) return json({ ok: false, error: 'category' }, 400, origin);
+    if (!cat) {
+      return json({
+        ok: false,
+        error: 'category',
+        errorText: 'Выберите категорию'
+      }, 400, origin);
+    }
     const pic = parseDobroPhoto(body.photo);
     if (!pic.ok) {
       return json({ ok: false, error: 'photo', errorText: pic.errorText || 'Нужно приложить фото' }, 400, origin);
