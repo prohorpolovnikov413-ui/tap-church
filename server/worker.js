@@ -363,16 +363,20 @@ async function dobroPhotoHash(base64) {
 }
 
 function dobroLooksBlank(base64) {
+  // Reject only tiny/near-uniform payloads (solid-color stubs), not normal phone photos.
   const bin = atob(base64);
-  if (bin.length < 1200) return true;
+  if (bin.length < 800) return true;
   let sum = 0, sumSq = 0, n = 0;
-  const step = Math.max(1, Math.floor(bin.length / 400));
+  const step = Math.max(1, Math.floor(bin.length / 500));
   for (let i = 0; i < bin.length; i += step) {
     const v = bin.charCodeAt(i);
     sum += v; sumSq += v * v; n++;
   }
+  if (n < 20) return true;
   const mean = sum / n;
-  return (sumSq / n - mean * mean) < 18;
+  const variance = sumSq / n - mean * mean;
+  // JPEG of a real scene has much higher byte variance; keep threshold low to avoid false rejects.
+  return variance < 6;
 }
 
 function dobroExtractJson(text) {
@@ -774,6 +778,7 @@ async function publicDobro(state, id, kv) {
       createdAt: item.createdAt,
       photoUrl,
       authorName: item.authorName,
+      authorId: item.authorId || '',
       isYou: item.authorId === id,
       status: item.status || 'approved',
       reason: item.reason || ''
@@ -948,7 +953,7 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     let info = null;
     try { info = JSON.parse(raw); } catch {}
     if (!info || !info.id) return json({ ok: false, error: 'token' }, 404, origin);
-    return json({ ok: true, name: info.name || 'Участник' }, 200, origin);
+    return json({ ok: true, id: info.id, name: info.name || 'Участник' }, 200, origin);
   }
   if (request.method === 'POST' && path === '/dobro/sync/claim') {
     const body = await request.json().catch(() => null);
