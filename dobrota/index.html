@@ -102,7 +102,7 @@
             <p class="hint tight">ИИ только отсекает недопустимый контент. Обычные кадры добрых дел проходят.</p>
             <button type="button" class="rules-link" id="btn-rules-add">ℹ Правила проверки фото</button>
             <div class="photo-actions">
-              <button type="button" class="btn btn-ghost" id="btn-camera">Сфотографировать</button>
+              <button type="button" class="btn btn-cam" id="btn-camera">Сфотографировать</button>
               <button type="button" class="btn btn-ghost" id="btn-gallery">Из галереи</button>
               <button type="button" class="linkish hidden" id="btn-del-photo">Убрать фото</button>
             </div>
@@ -119,9 +119,18 @@
       </section>
 
       <section id="panel-feed" class="panel active" data-title="Лента">
-        <p class="kicker">Лента</p>
-        <h2>Добрые дела в кадре</h2>
-        <p class="hint">Последние записи с фото от всех участников.</p>
+        <div class="daily-card" id="daily-card">
+          <p class="kicker warm">Задание дня</p>
+          <h2 id="daily-title">…</h2>
+          <p class="hint tight" id="daily-hint">Одна идея на всех — сделайте доброе дело сегодня.</p>
+          <button type="button" class="btn" id="btn-daily">Сделать это</button>
+        </div>
+        <div class="feed-filters" id="feed-filters" role="tablist" aria-label="Фильтр ленты">
+          <button type="button" class="feed-filter on" data-filter="all">Все</button>
+          <button type="button" class="feed-filter" data-filter="friends">Друзья</button>
+          <button type="button" class="feed-filter" data-filter="mine">Мои</button>
+          <button type="button" class="feed-filter" data-filter="today">Сегодня</button>
+        </div>
         <div id="feed-list"></div>
       </section>
 
@@ -151,6 +160,22 @@
           <button class="btn btn-ghost" type="submit">Сохранить имя</button>
         </form>
         <p class="profile-note muted" id="profile-note"></p>
+
+        <div class="profile-block rewards-block" id="rewards-block">
+          <h3 class="profile-h3">Награды</h3>
+          <div class="streak-row" id="streak-row">
+            <span class="streak-flame" aria-hidden="true">🔥</span>
+            <div>
+              <p class="streak-count" id="streak-count">Серия: 0 дней</p>
+              <p class="hint tight" id="streak-hint">Отмечайте добрые дела каждый день.</p>
+            </div>
+          </div>
+          <div class="level-row" id="level-row">
+            <span class="level-badge" id="level-badge">Помощник</span>
+            <p class="hint tight" id="level-hint">Уровень растёт с числом принятых дел.</p>
+          </div>
+          <div class="badges-grid" id="badges-grid"></div>
+        </div>
 
         <div class="profile-block" id="pin-block">
           <h3 class="profile-h3">PIN для входа</h3>
@@ -267,9 +292,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-7.45 5.1l1.86.64A6 6 0 1 0 12 6V3l4 3.5L12 10V7a5 5 0 1 1-4.9 6.1l-1.96.4A7 7 0 1 0 12 4z"/></svg>
         <span>История</span>
       </button>
-      <button type="button" class="tab tab-fab" data-tab="add" aria-label="Добавить дело">
-        <span class="fab">+</span>
-        <span>Дело</span>
+      <button type="button" class="tab tab-fab" data-tab="add" aria-label="Добавить доброе дело" id="tab-add">
+        <span class="fab" id="fab-add">+</span>
+        <span>Доброе дело</span>
       </button>
       <button type="button" class="tab" data-tab="board" aria-label="Рейтинг">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V10h3v10H7zm5 0V4h3v16h-3zm5 0v-7h3v7h-3z"/></svg>
@@ -281,6 +306,7 @@
       </button>
     </nav>
   </div>
+  <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
   <script src="app.js"></script>
 </body>
 </html>

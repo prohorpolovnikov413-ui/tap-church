@@ -5,6 +5,8 @@
   const IDB_NAME = 'dobrota-db';
   const IDB_STORE = 'session';
   const RULES_SEEN = 'dobrota-rules-seen-v1';
+  const LIKES_STORE = 'dobrota-likes-v1';
+  const FRIENDS_STORE = 'dobrota-friends-v1';
   const CATS = [
     { id: 'smile', label: 'Маленькая радость', hint: 'улыбка, комплимент, тёплое слово', points: 5 },
     { id: 'help', label: 'Практическая помощь', hint: 'помог с сумками, делом, дорогой', points: 15 },
@@ -13,11 +15,51 @@
     { id: 'volunteer', label: 'Волонтёрство', hint: 'время и силы ради других', points: 80 }
   ];
   const LABELS = Object.fromEntries(CATS.map((c) => [c.id, c.label]));
+  const DAILY_IDEAS = [
+    'Помоги соседу с сумками', 'Позвони близкому человеку', 'Оставь добрую записку незнакомцу',
+    'Уступи место в транспорте', 'Покорми бездомное животное', 'Подари улыбку кассиру',
+    'Помоги кому-то с дорогой', 'Собери мусор во дворе', 'Напиши благодарность учителю',
+    'Приготовь чай для родных', 'Поделись едой с нуждающимся', 'Выслушай друга без советов',
+    'Помоги ребёнку завязать шнурки', 'Открой дверь пожилому человеку', 'Подари книгу соседу',
+    'Напиши тёплое сообщение', 'Помоги с тяжёлой коробкой', 'Посади или полей растение',
+    'Сделай комплимент коллеге', 'Убери общий подъезд', 'Отдай ненужные вещи нуждающимся',
+    'Купи воду тому, кто просит', 'Помоги с коляской у лестницы', 'Нарисуй открытку для друга',
+    'Проверь, всё ли хорошо у соседа', 'Помоги с уроками младшим', 'Заплати за чей-то кофе',
+    'Поделись зонтом в дождь', 'Похвали работу курьера', 'Сфотографируй красивый момент для близких',
+    'Помоги найти потерянную вещь', 'Принеси печенье коллегам', 'Поддержи человека в очереди',
+    'Напиши письмо благодарности', 'Помоги с чемоданом', 'Подари цветок без повода',
+    'Выслушай жалобу спокойно', 'Помоги перейти дорогу', 'Сделай зарядку вместе с другом',
+    'Поделись музыкой, которая радует', 'Уступи очередь тому, кто спешит', 'Помоги с настройкой телефона',
+    'Принеси воду мастеру', 'Скажи «спасибо» водителю', 'Помоги найти адрес',
+    'Подари домашнюю выпечку', 'Помоги собрать разбросанные вещи', 'Напиши доброе ревью местному делу',
+    'Поддержи начинающего', 'Помоги с пересадкой цветов', 'Сделай минуту тишины для уставшего',
+    'Поделись тёплыми перчатками', 'Помоги донести коляску', 'Сфотографируй питомца для хозяина',
+    'Нарисуй мелом добрый рисунок', 'Подари наклейку ребёнку', 'Помоги с выбором в магазине',
+    'Отправь стикер «ты молодец»', 'Помоги соседу завести машину', 'Сделай сюрприз без повода'
+  ];
+  const LEVELS = [
+    { min: 0, name: 'Помощник', hint: 'Первые шаги в добре' },
+    { min: 3, name: 'Добрый сосед', hint: 'Вас уже замечают рядом' },
+    { min: 7, name: 'Тёплый свет', hint: 'Ваши дела согревают' },
+    { min: 15, name: 'Свет', hint: 'Вы вдохновляете других' },
+    { min: 30, name: 'Сердце двора', hint: 'Опора для многих' },
+    { min: 50, name: 'Добрый маяк', hint: 'Ваш пример виден издалека' }
+  ];
+  const BADGES = [
+    { id: 'first', name: 'Первое дело', need: 1, desc: 'Одно принятое дело' },
+    { id: 'streak3', name: 'Искра', needStreak: 3, desc: '3 дня подряд' },
+    { id: 'streak7', name: 'Неделя тепла', needStreak: 7, desc: '7 дней подряд · бонус' },
+    { id: 'streak30', name: 'Месяц добра', needStreak: 30, desc: '30 дней подряд · бонус' },
+    { id: 'ten', name: 'Десятка', need: 10, desc: '10 принятых дел' },
+    { id: 'photo5', name: 'В кадре', needPhotos: 5, desc: '5 дел с фото в ленте' }
+  ];
 
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), app = $('app');
   let user = null, photo = null, category = 'help', busy = false, prevTab = 'feed';
   let hasPin = false, pendingSync = '';
+  let lastState = null, feedFilter = 'all', reducedMotion = false;
+  try { reducedMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); } catch {}
 
   function randId() {
     const a = new Uint8Array(16);
@@ -113,6 +155,109 @@
     if (n1 === 1) return 'дело';
     if (n1 >= 2 && n1 <= 4) return 'дела';
     return 'дел';
+  }
+  function moscowDayKey(iso) {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).format(iso ? new Date(iso) : new Date());
+    } catch {
+      const d = iso ? new Date(iso) : new Date();
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  function dailyIdea() {
+    const key = moscowDayKey();
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+    return DAILY_IDEAS[h % DAILY_IDEAS.length];
+  }
+  function levelFor(count) {
+    let cur = LEVELS[0];
+    for (const lv of LEVELS) if ((count || 0) >= lv.min) cur = lv;
+    return cur;
+  }
+  function calcStreak(deeds) {
+    const days = new Set();
+    (deeds || []).forEach((d) => {
+      if ((d.status || 'approved') === 'approved' && d.createdAt) days.add(moscowDayKey(d.createdAt));
+    });
+    if (!days.size) return 0;
+    const today = moscowDayKey();
+    const parts = today.split('-').map(Number);
+    const todayUtc = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+    const yesterday = moscowDayKey(new Date(todayUtc - 86400000));
+    if (!days.has(today) && !days.has(yesterday)) return 0;
+    let s = 0;
+    let cursor = days.has(today) ? todayUtc : todayUtc - 86400000;
+    while (days.has(moscowDayKey(new Date(cursor)))) {
+      s++;
+      cursor -= 86400000;
+    }
+    return s;
+  }
+  function loadJson(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null') || fallback; } catch { return fallback; }
+  }
+  function saveJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }
+  function likesMap() { return loadJson(LIKES_STORE, {}); }
+  function friendsSet() { return new Set(loadJson(FRIENDS_STORE, [])); }
+  function toggleLike(feedId, authorKey) {
+    const likes = likesMap();
+    const on = !likes[feedId];
+    if (on) likes[feedId] = true; else delete likes[feedId];
+    saveJson(LIKES_STORE, likes);
+    if (authorKey && authorKey !== (user && user.id) && authorKey !== (user && user.name)) {
+      const fr = friendsSet();
+      if (on) fr.add(authorKey); else {
+        // keep friend once liked anyone from them historically — only remove if no likes left for them
+      }
+      if (on) { fr.add(String(authorKey)); saveJson(FRIENDS_STORE, [...fr]); }
+    }
+    return on;
+  }
+  function prefersReduced() { return reducedMotion; }
+  function burstConfetti() {
+    if (prefersReduced()) return;
+    const layer = $('fx-layer');
+    if (!layer) return;
+    const colors = ['#ffba0d', '#ff8c42', '#ffc857', '#1ec9b5', '#ff5c7a', '#f2f2f0'];
+    for (let i = 0; i < 36; i++) {
+      const el = document.createElement('span');
+      el.className = 'confetti-piece';
+      el.style.left = (Math.random() * 100) + '%';
+      el.style.background = colors[i % colors.length];
+      el.style.animationDelay = (Math.random() * 0.25) + 's';
+      el.style.transform = 'rotate(' + (Math.random() * 180) + 'deg)';
+      layer.appendChild(el);
+      setTimeout(() => el.remove(), 1400);
+    }
+  }
+  function floatHeartAt(x, y) {
+    if (prefersReduced()) return;
+    const layer = $('fx-layer');
+    if (!layer) return;
+    const el = document.createElement('span');
+    el.className = 'float-heart';
+    el.textContent = '💛';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    layer.appendChild(el);
+    setTimeout(() => el.remove(), 1000);
+  }
+  function renderDaily() {
+    const idea = dailyIdea();
+    const title = $('daily-title');
+    if (title) title.textContent = idea;
+    const btn = $('btn-daily');
+    if (btn) {
+      btn.onclick = () => {
+        $('title').value = idea;
+        setTab('add');
+        // One-tap camera prompt after short delay
+        setTimeout(() => { try { $('cam').click(); } catch {} }, 280);
+      };
+    }
   }
   function formatDate(iso) {
     return new Intl.DateTimeFormat('ru-RU', {
@@ -245,12 +390,14 @@
   }
   function startPollIfPending(data) {
     stopPoll();
-    const pending = (data.deeds || []).some((d) => d.status === 'pending');
-    if (!pending) return;
+    const pendingIds = new Set((data.deeds || []).filter((d) => d.status === 'pending').map((d) => d.id));
+    if (!pendingIds.size) return;
     pollTimer = setInterval(async () => {
       try {
         const next = await api('/dobro/state?id=' + encodeURIComponent(user.id));
+        const newlyApproved = (next.deeds || []).some((d) => pendingIds.has(d.id) && d.status === 'approved');
         renderState(next);
+        if (newlyApproved) burstConfetti();
         if (!(next.deeds || []).some((d) => d.status === 'pending')) stopPoll();
       } catch {}
     }, 2000);
@@ -314,37 +461,131 @@
     if (submit) submit.textContent = hasPin ? 'Сменить PIN' : 'Сохранить PIN';
   }
 
+  function filterFeed(items) {
+    const likes = likesMap();
+    const friends = friendsSet();
+    const today = moscowDayKey();
+    return (items || []).filter((item) => {
+      if (feedFilter === 'mine') return !!item.isYou;
+      if (feedFilter === 'today') return moscowDayKey(item.createdAt) === today;
+      if (feedFilter === 'friends') {
+        if (item.isYou) return false;
+        const key = item.authorId || item.authorName;
+        return friends.has(String(key)) || friends.has(String(item.authorName));
+      }
+      return true;
+    });
+  }
+
+  function renderFeedList(feed) {
+    const likes = likesMap();
+    const list = filterFeed(feed);
+    const box = $('feed-list');
+    if (!list.length) {
+      box.innerHTML = '<p class="muted" style="margin-top:1rem;padding:1rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока пусто в этом фильтре — добавьте дело с фото или смените фильтр.</p>';
+      return;
+    }
+    box.innerHTML = `<div class="feed">${list.map((item) => {
+      const fid = String(item.id);
+      const liked = !!likes[fid];
+      const lvl = levelFor(item.isYou ? ((lastState && lastState.me && lastState.me.deedCount) || 0) : 0);
+      const authorLvl = item.isYou ? lvl.name : (item.authorLevel || '');
+      return `
+      <article class="ig-card" data-feed-id="${esc(fid)}">
+        <img class="ig-photo" src="${esc(item.photoUrl)}" alt="">
+        <div class="ig-meta">
+          <div class="ig-author">
+            <p class="name">${esc(item.authorName || 'Участник')}${item.isYou ? ' · вы' : ''}</p>
+            ${authorLvl ? `<span class="lvl">${esc(authorLvl)}</span>` : ''}
+          </div>
+          <p class="ig-title">${esc(item.title)}</p>
+          <p class="ig-sub">${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
+          <div class="ig-actions">
+            <button type="button" class="heart-btn${liked ? ' on' : ''}" data-like="${esc(fid)}" data-author="${esc(item.authorId || item.authorName || '')}" aria-label="Нравится">
+              <svg viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.1C.7 9.7 2.2 6 5.6 6c1.9 0 3.2 1.1 4 2.2C10.4 7.1 11.7 6 13.6 6c3.4 0 4.9 3.7 2.9 6.9C18.7 16.7 12 21 12 21z"/></svg>
+              <span>${liked ? 'Нравится' : 'Отклик'}</span>
+            </button>
+          </div>
+        </div>
+      </article>`;
+    }).join('')}</div>`;
+    box.querySelectorAll('.heart-btn').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        const id = btn.getAttribute('data-like');
+        const author = btn.getAttribute('data-author');
+        const on = toggleLike(id, author);
+        btn.classList.toggle('on', on);
+        btn.classList.remove('pop');
+        void btn.offsetWidth;
+        btn.classList.add('pop');
+        btn.querySelector('span').textContent = on ? 'Нравится' : 'Отклик';
+        const r = btn.getBoundingClientRect();
+        floatHeartAt(r.left + r.width / 2, r.top);
+      });
+    });
+  }
+
+  function renderRewards(deeds, me) {
+    const streak = calcStreak(deeds);
+    const count = me.deedCount || 0;
+    const photos = (deeds || []).filter((d) => (d.status || 'approved') === 'approved' && d.photoUrl).length;
+    const lvl = levelFor(count);
+    const sc = $('streak-count');
+    if (sc) sc.textContent = `Серия: ${streak} ${streak === 1 ? 'день' : (streak >= 2 && streak <= 4 ? 'дня' : 'дней')}`;
+    const sh = $('streak-hint');
+    if (sh) {
+      if (streak >= 30) sh.textContent = 'Бонус 30 дней: вы на вершине постоянства.';
+      else if (streak >= 7) sh.textContent = 'Бонус 7 дней открыт. До месяца — ещё немного.';
+      else sh.textContent = 'Отмечайте добрые дела каждый день. Бонусы на 7 и 30 днях.';
+    }
+    const lb = $('level-badge');
+    if (lb) lb.textContent = lvl.name;
+    const lh = $('level-hint');
+    if (lh) lh.textContent = `${lvl.hint} · ${count} ${deedsWord(count)}`;
+    const grid = $('badges-grid');
+    if (grid) {
+      grid.innerHTML = BADGES.map((b) => {
+        let on = false;
+        if (b.need != null) on = count >= b.need;
+        if (b.needStreak != null) on = streak >= b.needStreak;
+        if (b.needPhotos != null) on = photos >= b.needPhotos;
+        return `<div class="badge-chip${on ? ' on' : ' locked'}"><strong>${esc(b.name)}</strong><span>${esc(b.desc)}</span></div>`;
+      }).join('');
+    }
+  }
+
   function renderState(data) {
+    lastState = data;
     const me = data.me || { name: user.name, totalPoints: 0, deedCount: 0 };
     if (typeof me.hasPin === 'boolean') {
       hasPin = me.hasPin;
       updatePinUi();
     }
+    const lvl = levelFor(me.deedCount || 0);
     $('nick').value = me.name || user.name;
-    $('me-line').innerHTML = `У вас сейчас <strong>${me.totalPoints}</strong> баллов и <strong>${me.deedCount}</strong> ${deedsWord(me.deedCount)}`;
+    $('me-line').innerHTML = `У вас сейчас <strong>${me.totalPoints}</strong> баллов и <strong>${me.deedCount}</strong> ${deedsWord(me.deedCount)} · <span style="color:var(--gold)">${esc(lvl.name)}</span>`;
     const chip = $('me-chip');
-    if (chip) chip.textContent = `${me.name || user.name} · ${me.totalPoints} б.`;
+    if (chip) chip.textContent = `${me.name || user.name} · ${lvl.name} · ${me.totalPoints} б.`;
     const note = $('profile-note');
-    if (note) note.textContent = `${me.totalPoints} баллов · ${me.deedCount} ${deedsWord(me.deedCount)}`;
+    if (note) note.textContent = `${me.totalPoints} баллов · ${me.deedCount} ${deedsWord(me.deedCount)} · уровень «${lvl.name}»`;
 
-    const feed = data.feed || [];
-    $('feed-list').innerHTML = feed.length ? `<div class="feed">${feed.map((item) => `
-      <article class="card">
-        <img src="${esc(item.photoUrl)}" alt="">
-        <p class="t">${esc(item.title)}</p>
-        <p class="m">${esc(item.authorName)}${item.isYou ? ' · это вы' : ''} · ${esc(LABELS[item.category] || item.category)} · +${item.points || 0}</p>
-      </article>`).join('')}</div>` : '<p class="muted" style="margin-top:1.2rem;padding:1.2rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">Пока нет дел с фото — добавьте запись со снимком.</p>';
+    renderDaily();
+    renderFeedList(data.feed || []);
 
     const board = data.board || [];
-    $('board-list').innerHTML = board.length ? board.map((e) => `
+    $('board-list').innerHTML = board.length ? board.map((e) => {
+      const bl = levelFor(e.deedCount || 0);
+      return `
       <li class="${e.isYou ? 'you' : ''}">
         <span class="rank">${e.rank}</span>
-        <div class="grow"><p>${esc(e.name)}${e.isYou ? ' <span class="muted">это вы</span>' : ''}</p>
+        <div class="grow"><p>${esc(e.name)}${e.isYou ? ' <span class="muted">это вы</span>' : ''} <span class="lvl" style="font-size:.65rem;margin-left:.25rem">${esc(bl.name)}</span></p>
         <p class="muted" style="font-weight:400">${e.deedCount} ${deedsWord(e.deedCount)}</p></div>
         <span class="pts-lg">${e.totalPoints}</span>
-      </li>`).join('') : '<li class="muted">Пока пусто — будьте первым, кто отметит доброе дело.</li>';
+      </li>`;
+    }).join('') : '<li class="muted">Пока пусто — будьте первым, кто отметит доброе дело.</li>';
 
     const deeds = data.deeds || [];
+    renderRewards(deeds, me);
     $('hist-list').innerHTML = deeds.length ? deeds.map((d) => `
       <li class="deed-item status-${esc(d.status || 'approved')}">
         ${d.photoUrl ? `<img class="thumb" src="${esc(d.photoUrl)}" alt="">` : ''}
@@ -378,6 +619,7 @@
         body: JSON.stringify({ id: user.id, deedId })
       });
       show($('flash'), `Принято · +${(data.deed && data.deed.points) || 0} баллов`, true, 'ok');
+      burstConfetti();
       await loadAll();
     } catch (e) {
       show($('error'), e.message || 'Не удалось принять дело', true);
@@ -588,11 +830,34 @@
   $('cam').onchange = (e) => onPick(e.target.files && e.target.files[0]);
   $('gal').onchange = (e) => onPick(e.target.files && e.target.files[0]);
 
+  // Big FAB: open add tab and launch camera in one gesture
+  const tabAdd = $('tab-add');
+  if (tabAdd) {
+    tabAdd.addEventListener('click', () => {
+      setTimeout(() => {
+        if (!photo) {
+          try { $('cam').click(); } catch {}
+        }
+      }, 220);
+    });
+  }
+
+  document.querySelectorAll('#feed-filters .feed-filter').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      feedFilter = btn.getAttribute('data-filter') || 'all';
+      document.querySelectorAll('#feed-filters .feed-filter').forEach((b) => {
+        b.classList.toggle('on', b === btn);
+      });
+      if (lastState) renderFeedList(lastState.feed || []);
+    });
+  });
+
   $('deed-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (busy) return;
     if (!photo) {
       show($('error'), 'Добавьте фото доброго дела — без него запись не принимается', true);
+      try { $('cam').click(); } catch {}
       return;
     }
     busy = true;
@@ -618,6 +883,7 @@
         show($('flash'), 'Отправлено · фото проверяется…', true, 'ok');
       } else if (st === 'approved') {
         show($('flash'), `✅ Принято · +${data.deed.points} баллов`, true, 'ok');
+        burstConfetti();
       } else {
         show($('flash'), `❌ Отклонено: ${(data.deed && data.deed.reason) || 'фото не подошло'}`, true, 'err');
       }
