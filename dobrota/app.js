@@ -7,6 +7,10 @@
   const RULES_SEEN = 'dobrota-rules-seen-v1';
   const LIKES_STORE = 'dobrota-likes-v1';
   const FRIENDS_STORE = 'dobrota-friends-v1';
+  const PUSH_PREF = 'dobrota-push-pref-v1';
+  const PUSH_PROMPT_SEEN = 'dobrota-push-prompt-v1';
+  // Must match server DOBRO_VAPID_PUBLIC_KEY (base64url uncompressed P-256). Fill after keygen.
+  const VAPID_PUBLIC_KEY = '';
   const CATS = [
     { id: 'help', label: 'Помощь', points: 15, icon: 'help' },
     { id: 'family', label: 'Семья', points: 15, icon: 'family' },
@@ -712,14 +716,188 @@
     show($('sync-err'), '', false);
   }
 
+  function urlB64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function isIos() {
+    try {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    } catch { return false; }
+  }
+  function isStandalonePwa() {
+    try {
+      return !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
+        !!(navigator.standalone);
+    } catch { return false; }
+  }
+  function pushSupported() {
+    return !!(VAPID_PUBLIC_KEY && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+  }
+  function readPushPref() {
+    try { return localStorage.getItem(PUSH_PREF) === '1'; } catch { return false; }
+  }
+  function writePushPref(on) {
+    try { localStorage.setItem(PUSH_PREF, on ? '1' : '0'); } catch {}
+  }
+  function pushPromptSeen() {
+    try { return localStorage.getItem(PUSH_PROMPT_SEEN) === '1'; } catch { return true; }
+  }
+  function markPushPromptSeen() {
+    try { localStorage.setItem(PUSH_PROMPT_SEEN, '1'); } catch {}
+  }
+
+  let pushServerOk = null;
+  async function checkPushServer() {
+    if (pushServerOk !== null) return pushServerOk;
+    if (!VAPID_PUBLIC_KEY) { pushServerOk = false; return false; }
+    try {
+      const data = await api('/dobro/ping');
+      pushServerOk = !!(data && data.push);
+    } catch {
+      pushServerOk = false;
+    }
+    return pushServerOk;
+  }
+
+  async function getPushRegistration() {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      return reg;
+    } catch { return null; }
+  }
+
+  async function currentPushSubscription() {
+    const reg = await getPushRegistration();
+    if (!reg || !reg.pushManager) return null;
+    try { return await reg.pushManager.getSubscription(); } catch { return null; }
+  }
+
+  async function enablePush() {
+    if (!pushSupported()) {
+      throw new Error(isIos() && !isStandalonePwa()
+        ? 'Добавьте на экран Домой, затем включите напоминания'
+        : 'Напоминания недоступны в этом браузере');
+    }
+    const serverOk = await checkPushServer();
+    if (!serverOk) throw new Error('Напоминания пока недоступны на сервере');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('Разрешите уведомления в настройках');
+    const reg = await getPushRegistration();
+    if (!reg) throw new Error('Service Worker не готов');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const json = sub.toJSON();
+    await api('/dobro/push/subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: user.id,
+        endpoint: json.endpoint,
+        keys: json.keys,
+        subscription: json
+      })
+    });
+    writePushPref(true);
+    return true;
+  }
+
+  async function disablePush() {
+    const sub = await currentPushSubscription();
+    if (sub && user) {
+      try {
+        await api('/dobro/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: user.id, endpoint: sub.endpoint })
+        });
+      } catch {}
+      try { await sub.unsubscribe(); } catch {}
+    } else if (user) {
+      try {
+        await api('/dobro/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: user.id })
+        });
+      } catch {}
+    }
+    writePushPref(false);
+  }
+
+  function updatePushUi() {
+    const block = $('push-block');
+    const toggle = $('push-enabled');
+    const hint = $('push-hint');
+    const iosHint = $('push-ios-hint');
+    if (!block || !toggle) return;
+    const supported = pushSupported();
+    const needHome = isIos() && !isStandalonePwa();
+    if (iosHint) iosHint.classList.toggle('hidden', !needHome);
+    toggle.checked = readPushPref();
+    toggle.disabled = !supported && !needHome;
+    if (!VAPID_PUBLIC_KEY) {
+      if (hint) hint.textContent = 'Скоро — настройка на сервере';
+      toggle.disabled = true;
+    } else if (needHome) {
+      if (hint) hint.textContent = 'Сначала добавьте приложение на экран Домой';
+    } else if (!supported) {
+      if (hint) hint.textContent = 'Браузер не поддерживает уведомления';
+      toggle.disabled = true;
+    } else {
+      if (hint) hint.textContent = 'Если нет доброго дела за день';
+    }
+  }
+
+  function hidePushPrompt() {
+    const el = $('push-prompt');
+    if (el) el.classList.add('hidden');
+  }
+  function showPushPrompt() {
+    const el = $('push-prompt');
+    if (el) el.classList.remove('hidden');
+  }
+
+  async function maybeShowPushPrompt() {
+    if (pushPromptSeen() || !user) return;
+    if (!VAPID_PUBLIC_KEY) return;
+    if (isIos() && !isStandalonePwa()) {
+      // Still show once with soft copy; toggle explains Home Screen
+      updatePushUi();
+    } else if (!pushSupported()) {
+      markPushPromptSeen();
+      return;
+    }
+    if (readPushPref()) { markPushPromptSeen(); return; }
+    // Gentle delay so it doesn't fight rules/onboarding
+    setTimeout(() => {
+      if (pushPromptSeen()) return;
+      showPushPrompt();
+    }, 1800);
+  }
+
   async function enterApp(initialTab) {
     gate.classList.add('hidden');
     app.classList.remove('hidden');
     renderCats();
     updateAddLabel();
     updatePinUi();
+    updatePushUi();
     setTab(initialTab || 'feed');
     await loadAll();
+    checkPushServer().then(() => updatePushUi()).catch(() => {});
+    maybeShowPushPrompt().catch(() => {});
   }
 
   function cleanPin(raw) {
@@ -1053,6 +1231,59 @@
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+  }
+
+  const pushToggle = $('push-enabled');
+  if (pushToggle) {
+    pushToggle.addEventListener('change', async () => {
+      if (!user) { pushToggle.checked = false; return; }
+      show($('error'), '', false);
+      show($('flash'), '', false);
+      if (pushToggle.checked) {
+        try {
+          await enablePush();
+          markPushPromptSeen();
+          hidePushPrompt();
+          show($('flash'), 'Напоминания включены', true);
+        } catch (e) {
+          pushToggle.checked = false;
+          writePushPref(false);
+          show($('error'), e.message || 'Не удалось включить', true);
+        }
+      } else {
+        try {
+          await disablePush();
+          show($('flash'), 'Напоминания выключены', true);
+        } catch (e) {
+          show($('error'), e.message || 'Не удалось выключить', true);
+        }
+      }
+      updatePushUi();
+    });
+  }
+  const pushYes = $('push-prompt-yes');
+  const pushNo = $('push-prompt-no');
+  if (pushYes) {
+    pushYes.addEventListener('click', async () => {
+      markPushPromptSeen();
+      hidePushPrompt();
+      if (!user) return;
+      try {
+        await enablePush();
+        if (pushToggle) pushToggle.checked = true;
+        show($('flash'), 'Напоминания включены', true);
+      } catch (e) {
+        if (pushToggle) pushToggle.checked = false;
+        show($('error'), e.message || 'Не удалось включить', true);
+      }
+      updatePushUi();
+    });
+  }
+  if (pushNo) {
+    pushNo.addEventListener('click', () => {
+      markPushPromptSeen();
+      hidePushPrompt();
+    });
   }
 
   async function boot() {

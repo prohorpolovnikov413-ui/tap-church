@@ -583,6 +583,25 @@ ol.board li:first-child, ul.hist li:first-child { border-top: 0; }
   opacity: .85;
 }
 .rules-profile-btn { width: 100%; margin-top: 1.25rem; }
+.push-toggle {
+  display: flex; align-items: center; gap: .65rem;
+  margin: .35rem 0 .25rem; cursor: pointer;
+  font-family: var(--font-display); font-weight: 600; font-size: .9rem; color: var(--ink);
+}
+.push-toggle input {
+  width: 1.15rem; height: 1.15rem; accent-color: var(--accent); flex: none;
+}
+.ios-push-hint { margin-top: .35rem; }
+.push-prompt {
+  position: fixed; left: .85rem; right: .85rem; bottom: calc(var(--tabbar-h) + .85rem + var(--safe-bottom));
+  z-index: 50; max-width: 22rem; margin: 0 auto;
+  padding: 1rem 1.05rem; border-radius: .65rem;
+  background: var(--foam); border: 1px solid var(--line);
+  box-shadow: 0 12px 32px rgba(0,0,0,.4);
+}
+.push-prompt p { margin: 0 0 .85rem; font-size: .95rem; line-height: 1.35; color: var(--ink); }
+.push-prompt-actions { display: flex; gap: .45rem; }
+.push-prompt-actions .btn { flex: 1; }
 .panel-rules { padding-bottom: .5rem; }
 .rules-hero {
   padding: 1rem 1rem 1.15rem;

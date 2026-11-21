@@ -841,9 +841,248 @@ function newDobroSyncToken() {
   return randToken(24);
 }
 
+/* ─── Dobrota Web Push (VAPID + aes128gcm, WebCrypto only) ─── */
+const DOBRO_PUSH_USERS = 'dobro:push:users';
+const DOBRO_PUSH_U = (id) => 'dobro:push:u:' + id;
+// Must match client VAPID_PUBLIC_KEY (base64url uncompressed P-256). Fill after keygen.
+const DOBRO_VAPID_PUBLIC_KEY = '';
+
+function b64urlToBytes(s) {
+  const str = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = '='.repeat((4 - (str.length % 4)) % 4);
+  const bin = atob(str + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64url(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+function concatBytes(...parts) {
+  const len = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+function utf8(s) { return new TextEncoder().encode(s); }
+
+async function hkdfBits(salt, ikm, info, length) {
+  const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({
+    name: 'HKDF', hash: 'SHA-256', salt, info
+  }, key, length * 8));
+}
+
+async function importVapidPrivateKey(env) {
+  const raw = env.VAPID_PRIVATE_KEY;
+  if (!raw || typeof raw !== 'string') return null;
+  let jwk = null;
+  try { jwk = JSON.parse(raw); } catch {}
+  if (!jwk || !jwk.d) {
+    // Accept bare base64url "d" and rebuild JWK from DOBRO_VAPID_PUBLIC_KEY
+    if (!DOBRO_VAPID_PUBLIC_KEY) return null;
+    const pub = b64urlToBytes(DOBRO_VAPID_PUBLIC_KEY);
+    if (pub.length !== 65 || pub[0] !== 4) return null;
+    jwk = {
+      kty: 'EC', crv: 'P-256', ext: true,
+      d: raw.trim(),
+      x: bytesToB64url(pub.slice(1, 33)),
+      y: bytesToB64url(pub.slice(33, 65))
+    };
+  }
+  return crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+}
+
+async function vapidJwt(endpoint, env, privateKey) {
+  const origin = new URL(endpoint).origin;
+  const subject = (env.VAPID_SUBJECT && String(env.VAPID_SUBJECT).trim()) || 'mailto:dobrota@localhost';
+  const header = bytesToB64url(utf8(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
+  const payload = bytesToB64url(utf8(JSON.stringify({
+    aud: origin,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: subject
+  })));
+  const data = utf8(header + '.' + payload);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, data));
+  return header + '.' + payload + '.' + bytesToB64url(sig);
+}
+
+async function encryptWebPush(payloadStr, p256dhB64, authB64) {
+  const clientPubRaw = b64urlToBytes(p256dhB64);
+  const clientAuth = b64urlToBytes(authB64);
+  const localKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const clientKey = await crypto.subtle.importKey('raw', clientPubRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const ecdhSecret = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: clientKey }, localKeys.privateKey, 256));
+  const asPublic = new Uint8Array(await crypto.subtle.exportKey('raw', localKeys.publicKey));
+  const keyInfo = concatBytes(utf8('WebPush: info'), new Uint8Array([0]), clientPubRaw, asPublic);
+  const ikm = await hkdfBits(clientAuth, ecdhSecret, keyInfo, 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdfBits(salt, ikm, concatBytes(utf8('Content-Encoding: aes128gcm'), new Uint8Array([0])), 16);
+  const nonce = await hkdfBits(salt, ikm, concatBytes(utf8('Content-Encoding: nonce'), new Uint8Array([0])), 12);
+  const aesKey = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  const padded = concatBytes(utf8(payloadStr), new Uint8Array([2]));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, tagLength: 128 }, aesKey, padded));
+  // aes128gcm header: salt(16) + rs(4) + idlen(1) + keyid(65) + ciphertext+tag
+  const rs = new Uint8Array(4);
+  new DataView(rs.buffer).setUint32(0, sealed.length + 16, false); // record size hint; single-record
+  // RFC 8188: rs is the size of each record including header overhead for streaming;
+  // for Web Push single record, use a large rs (e.g. 4096) as libraries do.
+  new DataView(rs.buffer).setUint32(0, 4096, false);
+  return concatBytes(salt, rs, new Uint8Array([65]), asPublic, sealed);
+}
+
+async function sendWebPush(env, sub, payloadObj) {
+  const privateKey = await importVapidPrivateKey(env);
+  if (!privateKey || !DOBRO_VAPID_PUBLIC_KEY) return { ok: false, status: 0, skip: true };
+  const body = await encryptWebPush(JSON.stringify(payloadObj), sub.p256dh, sub.auth);
+  const jwt = await vapidJwt(sub.endpoint, env, privateKey);
+  const res = await fetch(sub.endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: 'vapid t=' + jwt + ', k=' + DOBRO_VAPID_PUBLIC_KEY,
+      'Content-Encoding': 'aes128gcm',
+      'Content-Type': 'application/octet-stream',
+      TTL: '86400',
+      Urgency: 'normal',
+      Topic: 'dobrota-daily'
+    },
+    body
+  });
+  return { ok: res.status >= 200 && res.status < 300, status: res.status };
+}
+
+function dobroMoscowDayKey(iso) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(iso ? new Date(iso) : new Date());
+  } catch {
+    return (iso ? new Date(iso) : new Date()).toISOString().slice(0, 10);
+  }
+}
+
+function dobroUserHasApprovedToday(user) {
+  const today = dobroMoscowDayKey();
+  if (!user || !Array.isArray(user.deeds)) return false;
+  return user.deeds.some((d) => (d.status || 'approved') === 'approved' && d.createdAt && dobroMoscowDayKey(d.createdAt) === today);
+}
+
+function dobroCalcStreak(user) {
+  const days = new Set();
+  (user && user.deeds || []).forEach((d) => {
+    if ((d.status || 'approved') === 'approved' && d.createdAt) days.add(dobroMoscowDayKey(d.createdAt));
+  });
+  if (!days.size) return 0;
+  const today = dobroMoscowDayKey();
+  const parts = today.split('-').map(Number);
+  const todayUtc = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+  if (!days.has(today) && !days.has(dobroMoscowDayKey(new Date(todayUtc - 86400000)))) return 0;
+  let s = 0;
+  let cursor = days.has(today) ? todayUtc : todayUtc - 86400000;
+  while (days.has(dobroMoscowDayKey(new Date(cursor)))) {
+    s++;
+    cursor -= 86400000;
+  }
+  return s;
+}
+
+function dobroDailyPushText(streak) {
+  if (streak > 0) {
+    return 'Сегодня ещё нет доброго дела 🔥 Серия: ' + streak + ' — успей до полуночи';
+  }
+  return 'Сегодня ещё нет доброго дела 🔥 Успей до полуночи';
+}
+
+async function readPushUserIds(kv) {
+  try {
+    const raw = await kv.get(DOBRO_PUSH_USERS);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((id) => typeof id === 'string' && id.length >= 8) : [];
+  } catch { return []; }
+}
+
+async function writePushUserIds(kv, ids) {
+  await kv.put(DOBRO_PUSH_USERS, JSON.stringify(ids));
+}
+
+async function readPushSubs(kv, userId) {
+  try {
+    const raw = await kv.get(DOBRO_PUSH_U(userId));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+async function writePushSubs(kv, userId, subs) {
+  if (!subs.length) await kv.delete(DOBRO_PUSH_U(userId));
+  else await kv.put(DOBRO_PUSH_U(userId), JSON.stringify(subs));
+}
+
+function normalizePushSub(body) {
+  const sub = body && (body.subscription || body);
+  if (!sub || typeof sub.endpoint !== 'string' || !/^https:\/\//i.test(sub.endpoint)) return null;
+  const keys = sub.keys || {};
+  if (typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string') return null;
+  if (keys.p256dh.length < 20 || keys.auth.length < 8) return null;
+  return { endpoint: sub.endpoint.slice(0, 2048), p256dh: keys.p256dh, auth: keys.auth };
+}
+
+async function runDobroDailyPush(env) {
+  if (!env.VAPID_PRIVATE_KEY || !DOBRO_VAPID_PUBLIC_KEY) return { ok: false, skip: true };
+  const userIds = await readPushUserIds(env.KV);
+  if (!userIds.length) return { ok: true, sent: 0 };
+  const state = await getDobro(env.KV);
+  let sent = 0, removed = 0;
+  const stillUsers = [];
+  for (const userId of userIds) {
+    const user = state.users[userId];
+    let subs = await readPushSubs(env.KV, userId);
+    if (!subs.length) continue;
+    if (dobroUserHasApprovedToday(user)) {
+      stillUsers.push(userId);
+      continue;
+    }
+    const streak = dobroCalcStreak(user);
+    const payload = {
+      title: 'Доброта',
+      body: dobroDailyPushText(streak),
+      url: './?tab=add',
+      tag: 'dobrota-daily'
+    };
+    const keep = [];
+    let dirty = false;
+    for (const sub of subs) {
+      try {
+        const r = await sendWebPush(env, sub, payload);
+        if (r.skip) { keep.push(sub); continue; }
+        if (r.status === 404 || r.status === 410) { removed++; dirty = true; continue; }
+        if (r.ok) sent++;
+        keep.push(sub);
+      } catch {
+        keep.push(sub);
+      }
+    }
+    if (dirty || keep.length !== subs.length) await writePushSubs(env.KV, userId, keep);
+    if (keep.length) stillUsers.push(userId);
+  }
+  // Prune empty users from index only when changed
+  if (stillUsers.length !== userIds.length || stillUsers.some((id, i) => id !== userIds[i])) {
+    await writePushUserIds(env.KV, stillUsers);
+  }
+  return { ok: true, sent, removed };
+}
+
 async function handleDobro(request, env, ctx, url, path, origin) {
   if (request.method === 'GET' && (path === '/dobro/ping' || path === '/dobro')) {
-    return json({ ok: true, app: 'dobrota' }, 200, origin);
+    return json({
+      ok: true,
+      app: 'dobrota',
+      push: !!(env.VAPID_PRIVATE_KEY && DOBRO_VAPID_PUBLIC_KEY)
+    }, 200, origin);
   }
   if (request.method === 'GET' && path === '/dobro/state') {
     const id = url.searchParams.get('id') || '';
@@ -1168,10 +1407,62 @@ async function handleDobro(request, env, ctx, url, path, origin) {
       }
     }, 200, origin);
   }
+
+  if (request.method === 'POST' && path === '/dobro/push/subscribe') {
+    if (!env.VAPID_PRIVATE_KEY || !DOBRO_VAPID_PUBLIC_KEY) {
+      return json({ ok: false, error: 'push_disabled', errorText: 'Напоминания пока недоступны' }, 503, origin);
+    }
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    if (!state.users[body.id]) return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    const norm = normalizePushSub(body);
+    if (!norm) return json({ ok: false, error: 'subscription', errorText: 'Некорректная подписка' }, 400, origin);
+    const subs = await readPushSubs(env.KV, body.id);
+    const idx = subs.findIndex((s) => s.endpoint === norm.endpoint);
+    let changed = false;
+    if (idx >= 0) {
+      if (subs[idx].p256dh !== norm.p256dh || subs[idx].auth !== norm.auth) {
+        subs[idx] = { ...norm, updatedAt: Date.now() };
+        changed = true;
+      }
+    } else {
+      subs.push({ ...norm, updatedAt: Date.now() });
+      changed = true;
+    }
+    if (changed) await writePushSubs(env.KV, body.id, subs);
+    const users = await readPushUserIds(env.KV);
+    if (!users.includes(body.id)) {
+      users.push(body.id);
+      await writePushUserIds(env.KV, users);
+    }
+    return json({ ok: true }, 200, origin);
+  }
+
+  if (request.method === 'POST' && path === '/dobro/push/unsubscribe') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const endpoint = body.endpoint || (body.subscription && body.subscription.endpoint) || '';
+    let subs = await readPushSubs(env.KV, body.id);
+    const before = subs.length;
+    if (endpoint) subs = subs.filter((s) => s.endpoint !== endpoint);
+    else subs = [];
+    if (subs.length !== before) await writePushSubs(env.KV, body.id, subs);
+    if (!subs.length) {
+      const users = (await readPushUserIds(env.KV)).filter((id) => id !== body.id);
+      await writePushUserIds(env.KV, users);
+    }
+    return json({ ok: true }, 200, origin);
+  }
+
   return json({ ok: false, error: 'not_found' }, 404, origin);
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    // Cron: 0 16 * * * → 16:00 UTC = 19:00 Europe/Moscow
+    ctx.waitUntil(runDobroDailyPush(env).catch(() => {}));
+  },
   async fetch(request, env, ctx) {
     const origin = request.headers.get('origin') || '';
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
