@@ -1,43 +1,78 @@
-const CACHE = 'dobrota-v18';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'dobrota-v19';
+const ASSETS = [
+  './',
+  './index.html',
+  './style.css?v=19',
+  './app.js?v=19',
+  './manifest.webmanifest',
+  './icon-192.png',
+  './icon-512.png'
+];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
+
+function isShellAsset(url) {
+  const p = url.pathname;
+  return (
+    p.endsWith('/') ||
+    p.endsWith('.html') ||
+    p.endsWith('app.js') ||
+    p.endsWith('style.css') ||
+    p.endsWith('sw.js') ||
+    p.endsWith('manifest.webmanifest')
+  );
+}
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
   if (url.origin !== location.origin) return;
 
-  const isNav = e.request.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
-  if (isNav) {
+  const nav = e.request.mode === 'navigate' || isShellAsset(url);
+
+  // HTML / JS / CSS: network-first so Pages updates win over stale SW cache
+  if (nav) {
     e.respondWith(
-      fetch(e.request).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      }).catch(() => caches.match(e.request).then((cached) => cached || caches.match('./index.html')))
+      fetch(e.request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(e.request).then((cached) => cached || caches.match('./index.html'))
+        )
     );
     return;
   }
 
+  // Icons / other: cache-first
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request).then((res) => {
-      if (res.ok && url.pathname.includes('/dobrota/')) {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-      }
-      return res;
-    }))
+    caches.match(e.request).then(
+      (cached) =>
+        cached ||
+        fetch(e.request).then((res) => {
+          if (res.ok && url.pathname.includes('/dobrota/')) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
+          return res;
+        })
+    )
   );
 });
 
