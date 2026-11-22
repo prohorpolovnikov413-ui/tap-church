@@ -176,6 +176,51 @@ textarea { resize: vertical; min-height: 5rem; }
   display: block;
   background: #10100f;
 }
+.ig-card.need-card .ig-photo { aspect-ratio: 4 / 3; }
+.ig-card.need-card.no-photo .ig-meta { padding-top: 1.05rem; }
+.need-kicker {
+  display: inline-flex; align-items: center; gap: .35rem;
+  font-family: var(--font-display); font-size: .68rem; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--warm); margin: 0 0 .4rem;
+}
+.need-status {
+  font-size: .72rem; font-weight: 600; color: var(--ok-text);
+  margin: .35rem 0 0;
+}
+.need-offers {
+  margin: .55rem 0 0; padding: 0; list-style: none;
+  color: var(--ink-soft); font-size: .8rem;
+}
+.need-offers li { margin: .15rem 0; }
+.need-act {
+  appearance: none; border: 0; background: transparent; color: var(--ink);
+  display: inline-flex; align-items: center; gap: .35rem;
+  font-family: var(--font-display); font-weight: 700; font-size: .85rem;
+  padding: .25rem .15rem; cursor: pointer;
+}
+.need-act svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.need-act.on { color: var(--warm); }
+.need-act:disabled { opacity: .55; cursor: default; }
+.need-act .cnt { min-width: 1ch; color: var(--ink-soft); font-weight: 600; }
+.need-act.on .cnt { color: var(--warm); }
+.need-owner {
+  display: flex; gap: .45rem; flex-wrap: wrap; margin-top: .7rem;
+}
+.need-owner .btn { padding: .45rem .75rem; font-size: .78rem; }
+.add-mode {
+  display: flex; gap: .35rem; margin: 0 0 1rem;
+}
+.add-mode-btn {
+  flex: 1; appearance: none; border: 1px solid var(--line); background: transparent;
+  color: var(--ink-soft); font-family: var(--font-display); font-weight: 700;
+  font-size: .85rem; padding: .55rem .7rem; border-radius: .45rem; cursor: pointer;
+}
+.add-mode-btn.on {
+  color: var(--ink); border-color: var(--warm); background: var(--gold-soft);
+}
+.add-mode.needs-off #mode-need { display: none; }
+.add-mode.needs-off { display: none; }
 .ig-meta {
   padding: .9rem 1rem 1.05rem;
   background: var(--foam);

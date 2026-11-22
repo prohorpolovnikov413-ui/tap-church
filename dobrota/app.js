@@ -110,6 +110,7 @@
   category = normalizeCat(category);
   let hasPin = false, pendingSync = '';
   let lastState = null, feedFilter = 'all', reducedMotion = false;
+  let addMode = 'deed', needPhoto = null, needsServerOk = null;
   try { reducedMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); } catch {}
 
   function randId() {
@@ -390,11 +391,71 @@
         category: 'Выберите категорию',
         photo: 'Фото слишком большое или в неверном формате',
         rate: 'Подождите несколько секунд и попробуйте ещё раз',
-        id: 'Не удалось определить аккаунт'
+        id: 'Не удалось определить аккаунт',
+        need: 'Нужда не найдена',
+        limit: 'Слишком много открытых нужд',
+        self: 'Нельзя для своей нужды',
+        closed: 'Нужда уже закрыта',
+        contact: 'Некорректный контакт'
       };
       throw new Error(data && data.errorText ? data.errorText : (map[err] || err));
     }
     return data;
+  }
+
+  async function checkNeedsServer() {
+    if (needsServerOk !== null) return needsServerOk;
+    try {
+      const data = await api('/dobro/ping');
+      needsServerOk = !!(data && (data.needs || (data.features && data.features.needs)));
+    } catch {
+      needsServerOk = false;
+    }
+    updateNeedsUi();
+    return needsServerOk;
+  }
+
+  function updateNeedsUi() {
+    const mode = $('add-mode');
+    const filterBtn = document.querySelector('#feed-filters .feed-filter[data-filter="needs"]');
+    if (mode) mode.classList.toggle('needs-off', needsServerOk === false);
+    if (filterBtn) filterBtn.classList.toggle('hidden', needsServerOk === false);
+    if (needsServerOk === false && addMode === 'need') setAddMode('deed');
+    if (needsServerOk === false && feedFilter === 'needs') {
+      feedFilter = 'all';
+      document.querySelectorAll('#feed-filters .feed-filter').forEach((b) => {
+        b.classList.toggle('on', b.getAttribute('data-filter') === 'all');
+      });
+      if (lastState) renderFeedList(lastState.feed || []);
+    }
+  }
+
+  function setAddMode(mode) {
+    addMode = mode === 'need' ? 'need' : 'deed';
+    document.querySelectorAll('#add-mode .add-mode-btn').forEach((b) => {
+      b.classList.toggle('on', b.getAttribute('data-mode') === addMode);
+    });
+    const deedForm = $('deed-form');
+    const needForm = $('need-form');
+    if (deedForm) deedForm.classList.toggle('hidden', addMode !== 'deed');
+    if (needForm) needForm.classList.toggle('hidden', addMode !== 'need');
+    const title = $('app-title');
+    if (title && document.getElementById('panel-add') && document.getElementById('panel-add').classList.contains('active')) {
+      title.textContent = addMode === 'need' ? 'Нужда' : 'Новое дело';
+    }
+  }
+
+  function openContact(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return false;
+    let url = '';
+    if (/^https?:\/\//i.test(s)) url = s;
+    else if (/^(t\.me|telegram\.me)\//i.test(s)) url = 'https://' + s;
+    else if (/^@[\w.\u0400-\u04ff]+$/i.test(s)) url = 'https://t.me/' + s.slice(1);
+    else if (/^\+?\d[\d\s()-]{6,}$/.test(s)) url = 'tel:' + s.replace(/[^\d+]/g, '');
+    else if (/^[\w.\u0400-\u04ff]{3,32}$/i.test(s)) url = 'https://t.me/' + s.replace(/^@/, '');
+    else return false;
+    try { window.open(url, '_blank', 'noopener'); return true; } catch { location.href = url; return true; }
   }
 
   function renderCats() {
@@ -467,7 +528,7 @@
 
   function setTab(name) {
     const titles = {
-      add: 'Новое дело',
+      add: addMode === 'need' ? 'Нужда' : 'Новое дело',
       feed: 'Лента',
       board: 'Рейтинг',
       history: 'История',
@@ -513,11 +574,15 @@
     if (submit) submit.textContent = hasPin ? 'Сменить' : 'Сохранить';
   }
 
+  function isNeedItem(item) {
+    return !!(item && (item.type === 'need' || item.category === 'need'));
+  }
+
   function filterFeed(items) {
-    const likes = likesMap();
     const friends = friendsSet();
     const today = moscowDayKey();
     return (items || []).filter((item) => {
+      if (feedFilter === 'needs') return isNeedItem(item);
       if (feedFilter === 'mine') return !!item.isYou;
       if (feedFilter === 'today') return moscowDayKey(item.createdAt) === today;
       if (feedFilter === 'friends') {
@@ -529,6 +594,51 @@
     });
   }
 
+  function renderNeedCard(item) {
+    const fid = String(item.id);
+    const resolved = (item.status || 'open') === 'resolved';
+    const photo = item.photoUrl
+      ? `<img class="ig-photo" src="${esc(item.photoUrl)}" alt="">`
+      : '';
+    const offers = (item.isYou && item.offers && item.offers.length)
+      ? `<ul class="need-offers">${item.offers.slice(0, 6).map((o) => `<li>${esc(o.name || 'Участник')}</li>`).join('')}</ul>`
+      : '';
+    const owner = item.isYou
+      ? `<div class="need-owner">
+          ${!resolved ? `<button type="button" class="btn btn-ghost need-resolve" data-need="${esc(fid)}">Решено</button>` : ''}
+          <button type="button" class="btn btn-ghost need-delete" data-need="${esc(fid)}">Удалить</button>
+        </div>`
+      : '';
+    return `
+      <article class="ig-card need-card${!item.photoUrl ? ' no-photo' : ''}${resolved ? ' resolved' : ''}" data-feed-id="${esc(fid)}" data-type="need">
+        ${photo}
+        <div class="ig-meta">
+          <p class="need-kicker">Нужда</p>
+          <div class="ig-author">
+            <p class="name">${esc(item.authorName || 'Участник')}${item.isYou ? ' · вы' : ''}</p>
+          </div>
+          <p class="ig-title">${esc(item.text || item.title || '')}</p>
+          ${resolved ? '<p class="need-status">Решено</p>' : ''}
+          ${offers}
+          ${!resolved && !item.isYou ? `
+          <div class="ig-actions">
+            <button type="button" class="need-act need-pray${item.prayed ? ' on' : ''}" data-need="${esc(fid)}" aria-label="Помолился" ${item.prayed ? 'disabled' : ''}>
+              <span aria-hidden="true">🙏</span><span class="cnt">${item.prayCount || 0}</span>
+            </button>
+            <button type="button" class="need-act need-help${item.helped ? ' on' : ''}" data-need="${esc(fid)}" data-has-contact="${item.hasContact || item.contact ? '1' : '0'}" aria-label="Помочь">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10 5.9"/><path d="M14 11a5 5 0 0 0-7.1 0L5.5 12.4a5 5 0 0 0 7.1 7.1L14 18.1"/></svg>
+              <span class="cnt">${item.helpCount || 0}</span>
+            </button>
+          </div>` : `
+          <div class="ig-actions">
+            <span class="need-act on" aria-hidden="true">🙏 <span class="cnt">${item.prayCount || 0}</span></span>
+            <span class="need-act on" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l1.4-1.4a5 5 0 0 0-7.1-7.1L10 5.9"/><path d="M14 11a5 5 0 0 0-7.1 0L5.5 12.4a5 5 0 0 0 7.1 7.1L14 18.1"/></svg> <span class="cnt">${item.helpCount || 0}</span></span>
+          </div>`}
+          ${owner}
+        </div>
+      </article>`;
+  }
+
   function renderFeedList(feed) {
     const likes = likesMap();
     const list = filterFeed(feed);
@@ -538,12 +648,13 @@
       return;
     }
     box.innerHTML = `<div class="feed">${list.map((item) => {
+      if (isNeedItem(item)) return renderNeedCard(item);
       const fid = String(item.id);
       const liked = !!likes[fid];
       const lvl = levelFor(item.isYou ? ((lastState && lastState.me && lastState.me.deedCount) || 0) : 0);
       const authorLvl = item.isYou ? lvl.name : (item.authorLevel || '');
       return `
-      <article class="ig-card" data-feed-id="${esc(fid)}">
+      <article class="ig-card" data-feed-id="${esc(fid)}" data-type="deed">
         <img class="ig-photo" src="${esc(item.photoUrl)}" alt="">
         <div class="ig-meta">
           <div class="ig-author">
@@ -573,6 +684,124 @@
         floatHeartAt(r.left + r.width / 2, r.top);
       });
     });
+    box.querySelectorAll('.need-pray').forEach((btn) => {
+      btn.addEventListener('click', () => prayNeed(Number(btn.getAttribute('data-need')), btn));
+    });
+    box.querySelectorAll('.need-help').forEach((btn) => {
+      btn.addEventListener('click', () => helpNeed(Number(btn.getAttribute('data-need')), btn));
+    });
+    box.querySelectorAll('.need-resolve').forEach((btn) => {
+      btn.addEventListener('click', () => resolveNeed(Number(btn.getAttribute('data-need')), btn));
+    });
+    box.querySelectorAll('.need-delete').forEach((btn) => {
+      btn.addEventListener('click', () => deleteNeed(Number(btn.getAttribute('data-need')), btn));
+    });
+  }
+
+  function patchNeedInState(needId, patch) {
+    if (!lastState || !Array.isArray(lastState.feed)) return;
+    const item = lastState.feed.find((f) => isNeedItem(f) && Number(f.id) === Number(needId));
+    if (!item) return;
+    Object.assign(item, patch);
+    renderFeedList(lastState.feed);
+  }
+
+  async function prayNeed(needId, btn) {
+    if (busy || !user || !Number.isFinite(needId)) return;
+    if (!(await checkNeedsServer())) {
+      show($('error'), 'Нужды пока недоступны на сервере', true);
+      return;
+    }
+    busy = true;
+    if (btn) btn.disabled = true;
+    show($('error'), '', false);
+    try {
+      const data = await api('/dobro/need/pray', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id, needId })
+      });
+      patchNeedInState(needId, { prayed: true, prayCount: data.prayCount || 0 });
+      if (data.awarded) {
+        show($('flash'), `+${data.points || 5}`, true, 'ok');
+        burstConfetti();
+        await loadAll();
+      }
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось', true);
+      if (btn) btn.disabled = false;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function helpNeed(needId, btn) {
+    if (busy || !user || !Number.isFinite(needId)) return;
+    if (!(await checkNeedsServer())) {
+      show($('error'), 'Нужды пока недоступны на сервере', true);
+      return;
+    }
+    busy = true;
+    show($('error'), '', false);
+    try {
+      const data = await api('/dobro/need/help', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id, needId })
+      });
+      patchNeedInState(needId, { helped: true, helpCount: data.helpCount || 0 });
+      if (data.hasContact && data.contact) openContact(data.contact);
+      else if (data.offered) show($('flash'), 'Отклик отправлен', true, 'ok');
+      if (data.awarded) {
+        show($('flash'), `+${data.points || 5}`, true, 'ok');
+        burstConfetti();
+        await loadAll();
+      }
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось', true);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function resolveNeed(needId, btn) {
+    if (busy || !user || !Number.isFinite(needId)) return;
+    busy = true;
+    if (btn) btn.disabled = true;
+    try {
+      await api('/dobro/need/resolve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id, needId })
+      });
+      show($('flash'), 'Решено', true, 'ok');
+      await loadAll();
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось', true);
+      if (btn) btn.disabled = false;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteNeed(needId, btn) {
+    if (busy || !user || !Number.isFinite(needId)) return;
+    busy = true;
+    if (btn) btn.disabled = true;
+    try {
+      await api('/dobro/need/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: user.id, needId })
+      });
+      show($('flash'), 'Удалено', true, 'ok');
+      await loadAll();
+    } catch (e) {
+      show($('error'), e.message || 'Не удалось', true);
+      if (btn) btn.disabled = false;
+    } finally {
+      busy = false;
+    }
   }
 
   function renderRewards(deeds, me) {
@@ -598,6 +827,10 @@
 
   function renderState(data) {
     lastState = data;
+    if (data && (data.features && data.features.needs || Array.isArray(data.feed) && data.feed.some(isNeedItem))) {
+      needsServerOk = true;
+      updateNeedsUi();
+    }
     const me = data.me || { name: user.name, totalPoints: 0, deedCount: 0 };
     if (typeof me.hasPin === 'boolean') {
       hasPin = me.hasPin;
@@ -894,9 +1127,12 @@
     updateAddLabel();
     updatePinUi();
     updatePushUi();
+    updateNeedsUi();
+    setAddMode(addMode);
     setTab(initialTab || 'feed');
     await loadAll();
     checkPushServer().then(() => updatePushUi()).catch(() => {});
+    checkNeedsServer().catch(() => {});
     maybeShowPushPrompt().catch(() => {});
   }
 
@@ -1046,10 +1282,116 @@
   $('cam').onchange = (e) => onPick(e.target.files && e.target.files[0]);
   $('gal').onchange = (e) => onPick(e.target.files && e.target.files[0]);
 
+  function clearNeedPhoto() {
+    needPhoto = null;
+    const cam = $('need-cam'), gal = $('need-gal'), prev = $('need-preview'), del = $('btn-need-del-photo');
+    if (cam) cam.value = '';
+    if (gal) gal.value = '';
+    if (prev) { prev.src = ''; prev.classList.add('hidden'); }
+    if (del) del.classList.add('hidden');
+  }
+  async function onNeedPick(file) {
+    if (!file) return;
+    show($('error'), '', false);
+    try {
+      needPhoto = await compressImage(file);
+      const prev = $('need-preview');
+      if (prev) {
+        prev.src = needPhoto;
+        prev.classList.remove('hidden');
+      }
+      const del = $('btn-need-del-photo');
+      if (del) del.classList.remove('hidden');
+    } catch (e) {
+      show($('error'), e.message, true);
+    }
+  }
+  const btnNeedCam = $('btn-need-camera');
+  const btnNeedGal = $('btn-need-gallery');
+  const btnNeedDel = $('btn-need-del-photo');
+  if (btnNeedCam) btnNeedCam.onclick = () => $('need-cam').click();
+  if (btnNeedGal) btnNeedGal.onclick = () => $('need-gal').click();
+  if (btnNeedDel) btnNeedDel.onclick = clearNeedPhoto;
+  const needCam = $('need-cam');
+  const needGal = $('need-gal');
+  if (needCam) needCam.onchange = (e) => onNeedPick(e.target.files && e.target.files[0]);
+  if (needGal) needGal.onchange = (e) => onNeedPick(e.target.files && e.target.files[0]);
+
+  document.querySelectorAll('#add-mode .add-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const mode = btn.getAttribute('data-mode') || 'deed';
+      if (mode === 'need') {
+        const ok = await checkNeedsServer();
+        if (!ok) {
+          show($('error'), 'Нужды пока недоступны — обновите позже', true);
+          return;
+        }
+      }
+      setAddMode(mode);
+    });
+  });
+
+  const needForm = $('need-form');
+  if (needForm) {
+    needForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (busy || !user) return;
+      if (!(await checkNeedsServer())) {
+        show($('error'), 'Нужды пока недоступны на сервере', true);
+        return;
+      }
+      const text = ($('need-text') && $('need-text').value || '').trim();
+      if (text.length < 3) {
+        show($('error'), 'Опишите нужду чуть подробнее', true);
+        return;
+      }
+      busy = true;
+      show($('error'), '', false);
+      show($('flash'), '', false);
+      const submitBtn = $('btn-need-add');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        await api('/dobro/need', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: user.id,
+            text,
+            contact: ($('need-contact') && $('need-contact').value) || '',
+            photo: needPhoto || undefined
+          })
+        });
+        if ($('need-text')) $('need-text').value = '';
+        if ($('need-contact')) $('need-contact').value = '';
+        clearNeedPhoto();
+        show($('flash'), 'Опубликовано', true, 'ok');
+        setTab('feed');
+        feedFilter = 'needs';
+        document.querySelectorAll('#feed-filters .feed-filter').forEach((b) => {
+          b.classList.toggle('on', b.getAttribute('data-filter') === 'needs');
+        });
+        await loadAll();
+      } catch (e) {
+        const msg = e.message || 'Ошибка';
+        if (/not_found|404|не найден/i.test(msg) || needsServerOk === false) {
+          needsServerOk = false;
+          updateNeedsUi();
+          show($('error'), 'Нужды пока недоступны на сервере', true);
+        } else {
+          show($('error'), msg, true);
+        }
+      } finally {
+        busy = false;
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+
   // Big FAB: open add tab and launch camera (only after rules already seen)
   const tabAdd = $('tab-add');
   if (tabAdd) {
     tabAdd.addEventListener('click', () => {
+      setAddMode('deed');
       setTimeout(maybeOpenCamera, 220);
     });
   }

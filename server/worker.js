@@ -287,6 +287,9 @@ async function registerRefCode(kv, id, code) {
 const DOBRO_KEY = 'dobro:v1';
 const DOBRO_FEED_MAX = 50;
 const DOBRO_HIST_MAX = 50;
+const DOBRO_NEEDS_MAX = 40;
+const DOBRO_NEED_OPEN_MAX = 5;
+const DOBRO_NEED_ACT_POINTS = 5;
 const DOBRO_PHOTO_MAX = 60 * 1024;
 const DOBRO_DEED_MS = 10000;
 const DOBRO_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
@@ -336,6 +339,112 @@ function cleanDobroTitle(raw) {
   const low = s.toLowerCase();
   for (const w of BAD) if (low.includes(w)) return { ok: false, error: 'title' };
   return { ok: true, title: s };
+}
+
+function cleanDobroNeedText(raw) {
+  return cleanDobroTitle(raw);
+}
+
+function cleanDobroContact(raw) {
+  if (raw == null || raw === '') return { ok: true, contact: '' };
+  if (typeof raw !== 'string') return { ok: false, error: 'contact', errorText: 'Некорректный контакт' };
+  let s = stripBlankish(raw).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!s) return { ok: true, contact: '' };
+  const low = s.toLowerCase();
+  for (const w of BAD) if (low.includes(w)) return { ok: false, error: 'contact', errorText: 'Контакт отклонён' };
+  if (/javascript:/i.test(s) || /data:/i.test(s)) {
+    return { ok: false, error: 'contact', errorText: 'Контакт отклонён' };
+  }
+  return { ok: true, contact: s };
+}
+
+function parseOptionalDobroPhoto(value) {
+  if (value == null || value === '') return { ok: true, photo: null, base64: null };
+  return parseDobroPhoto(value);
+}
+
+function ensureDobroNeeds(state) {
+  if (!Array.isArray(state.needs)) state.needs = [];
+  return state.needs;
+}
+
+function findDobroNeed(state, needId) {
+  const id = Number(needId);
+  if (!Number.isFinite(id)) return null;
+  const needs = ensureDobroNeeds(state);
+  const idx = needs.findIndex((n) => n && n.id === id);
+  if (idx < 0) return null;
+  return { need: needs[idx], idx, needs };
+}
+
+function pruneDobroNeeds(kv, state) {
+  const needs = ensureDobroNeeds(state);
+  if (needs.length <= DOBRO_NEEDS_MAX) return;
+  const dropped = needs.splice(DOBRO_NEEDS_MAX);
+  state.needs = needs;
+  if (!kv) return;
+  for (const n of dropped) {
+    if (n && n.hasPhoto && n.id != null) deleteDobroPhotoBlob(kv, n.id);
+  }
+}
+
+function publicNeedItem(n, viewerId, photoUrl) {
+  const prayed = n.prayed && typeof n.prayed === 'object' ? n.prayed : {};
+  const helped = n.helped && typeof n.helped === 'object' ? n.helped : {};
+  const offers = Array.isArray(n.offers) ? n.offers.slice(0, 12) : [];
+  const isYou = n.authorId === viewerId;
+  return {
+    id: n.id,
+    type: 'need',
+    title: n.text || n.title || '',
+    text: n.text || n.title || '',
+    category: 'need',
+    points: 0,
+    createdAt: n.createdAt,
+    photoUrl: photoUrl || null,
+    hasPhoto: !!n.hasPhoto,
+    authorName: n.authorName || 'Участник',
+    authorId: n.authorId || '',
+    isYou,
+    status: n.status || 'open',
+    contact: n.contact || '',
+    hasContact: !!(n.contact && String(n.contact).trim()),
+    prayCount: n.prayCount || Object.keys(prayed).length || 0,
+    helpCount: n.helpCount || Object.keys(helped).length || 0,
+    prayed: !!(viewerId && prayed[viewerId]),
+    helped: !!(viewerId && helped[viewerId]),
+    offers: isYou ? offers.map((o) => ({
+      id: o.id,
+      name: o.name || 'Участник',
+      createdAt: o.createdAt || ''
+    })) : []
+  };
+}
+
+function awardNeedActionDeed(state, userId, need, kind) {
+  const user = state.users[userId];
+  if (!user) return null;
+  if (!Array.isArray(user.deeds)) user.deeds = [];
+  const points = DOBRO_NEED_ACT_POINTS;
+  const title = kind === 'pray' ? 'Молитва' : 'Помощь';
+  const category = kind === 'pray' ? 'care' : 'help';
+  const deed = {
+    id: state.seq++,
+    title,
+    category,
+    points,
+    createdAt: new Date().toISOString(),
+    status: 'approved',
+    reason: kind === 'pray' ? 'Молитва за нужду' : 'Отклик на нужду',
+    kind: kind === 'pray' ? 'need_pray' : 'need_help',
+    needId: need.id,
+    hasPhoto: false
+  };
+  user.deeds.unshift(deed);
+  if (user.deeds.length > DOBRO_HIST_MAX) user.deeds = user.deeds.slice(0, DOBRO_HIST_MAX);
+  user.points = (user.points || 0) + points;
+  user.deedCount = (user.deedCount || 0) + 1;
+  return deed;
 }
 
 function parseDobroPhoto(value) {
@@ -639,7 +748,7 @@ function applyDobroApproval(st, userId, deedId, reason) {
 }
 
 function emptyDobro() {
-  return { users: {}, feed: [], seq: 1 };
+  return { users: {}, feed: [], needs: [], seq: 1 };
 }
 
 async function getDobro(kv) {
@@ -647,6 +756,7 @@ async function getDobro(kv) {
   if (!state || typeof state !== 'object') return emptyDobro();
   if (!state.users || typeof state.users !== 'object') state.users = {};
   if (!Array.isArray(state.feed)) state.feed = [];
+  if (!Array.isArray(state.needs)) state.needs = [];
   if (!state.seq) state.seq = 1;
   return state;
 }
@@ -772,6 +882,7 @@ async function publicDobro(state, id, kv) {
     if (!photoUrl) continue; // лента только с фото
     feed.push({
       id: item.id,
+      type: 'deed',
       title: item.title,
       category: publicDobroCategory(item.category),
       points: item.points,
@@ -784,6 +895,17 @@ async function publicDobro(state, id, kv) {
       reason: item.reason || ''
     });
   }
+  // Needs: open (all) + own resolved; optional photo
+  const needs = ensureDobroNeeds(state);
+  for (const n of needs) {
+    if (!n || (n.status || 'open') === 'deleted') continue;
+    const open = (n.status || 'open') === 'open';
+    if (!open && n.authorId !== id) continue;
+    let photoUrl = null;
+    if (n.hasPhoto) photoUrl = await resolveDeedPhotoUrl(kv, n);
+    feed.push(publicNeedItem(n, id, photoUrl));
+  }
+  feed.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const deeds = [];
   if (u && Array.isArray(u.deeds)) {
     for (const d of u.deeds) {
@@ -796,6 +918,8 @@ async function publicDobro(state, id, kv) {
         photoUrl: await resolveDeedPhotoUrl(kv, d),
         status: d.status || 'approved',
         reason: d.reason || '',
+        kind: d.kind || '',
+        needId: d.needId || null,
         canRecover: d.status === 'error' || (d.status === 'rejected' && dobroIsVerifyInfraFail(d.reason))
       });
     }
@@ -809,7 +933,8 @@ async function publicDobro(state, id, kv) {
     },
     board,
     feed,
-    deeds
+    deeds,
+    features: { needs: true }
   };
 }
 
@@ -1081,7 +1206,8 @@ async function handleDobro(request, env, ctx, url, path, origin) {
     return json({
       ok: true,
       app: 'dobrota',
-      push: !!(env.VAPID_PRIVATE_KEY && DOBRO_VAPID_PUBLIC_KEY)
+      push: !!(env.VAPID_PRIVATE_KEY && DOBRO_VAPID_PUBLIC_KEY),
+      needs: true
     }, 200, origin);
   }
   if (request.method === 'GET' && path === '/dobro/state') {
@@ -1406,6 +1532,187 @@ async function handleDobro(request, env, ctx, url, path, origin) {
         reason: done.reason || ''
       }
     }, 200, origin);
+  }
+
+  // ─── Needs (нужды) ───
+  if (request.method === 'POST' && path === '/dobro/need') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const text = cleanDobroNeedText(body.text || body.title);
+    if (!text.ok) {
+      return json({ ok: false, error: 'title', errorText: 'Опишите нужду чуть подробнее' }, 400, origin);
+    }
+    const contact = cleanDobroContact(body.contact);
+    if (!contact.ok) {
+      return json({ ok: false, error: 'contact', errorText: contact.errorText || 'Некорректный контакт' }, 400, origin);
+    }
+    const pic = parseOptionalDobroPhoto(body.photo);
+    if (!pic.ok) {
+      return json({ ok: false, error: 'photo', errorText: pic.errorText || 'Неверное фото' }, 400, origin);
+    }
+    const state = await getDobro(env.KV);
+    const rec = state.users[body.id];
+    if (!rec) return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    const now = Date.now();
+    if (rec.lastAt && now - rec.lastAt < DOBRO_DEED_MS) {
+      return json({ ok: false, error: 'rate' }, 429, origin);
+    }
+    const needs = ensureDobroNeeds(state);
+    const openCount = needs.filter((n) => n && n.authorId === body.id && (n.status || 'open') === 'open').length;
+    if (openCount >= DOBRO_NEED_OPEN_MAX) {
+      return json({
+        ok: false,
+        error: 'limit',
+        errorText: 'Сначала закройте одну из открытых нужд'
+      }, 400, origin);
+    }
+    const needId = state.seq++;
+    if (pic.photo) await putDobroPhotoBlob(env.KV, needId, pic.photo);
+    const need = {
+      id: needId,
+      text: text.title,
+      authorId: body.id,
+      authorName: rec.name || 'Участник',
+      contact: contact.contact,
+      hasPhoto: !!pic.photo,
+      createdAt: new Date(now).toISOString(),
+      status: 'open',
+      prayCount: 0,
+      helpCount: 0,
+      prayed: {},
+      helped: {},
+      offers: []
+    };
+    needs.unshift(need);
+    rec.lastAt = now;
+    pruneDobroNeeds(env.KV, state);
+    await putDobro(env.KV, state);
+    return json({
+      ok: true,
+      need: publicNeedItem(need, body.id, pic.photo || null)
+    }, 201, origin);
+  }
+
+  if (request.method === 'POST' && path === '/dobro/need/pray') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const hit = findDobroNeed(state, body.needId);
+    if (!hit) return json({ ok: false, error: 'need', errorText: 'Нужда не найдена' }, 404, origin);
+    const need = hit.need;
+    if ((need.status || 'open') !== 'open') {
+      return json({ ok: false, error: 'closed', errorText: 'Нужда уже закрыта' }, 400, origin);
+    }
+    if (need.authorId === body.id) {
+      return json({ ok: false, error: 'self', errorText: 'Нельзя за свою нужду' }, 400, origin);
+    }
+    if (!state.users[body.id]) {
+      return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    }
+    if (!need.prayed || typeof need.prayed !== 'object') need.prayed = {};
+    let awarded = false;
+    let deed = null;
+    if (!need.prayed[body.id]) {
+      need.prayed[body.id] = 1;
+      need.prayCount = Object.keys(need.prayed).length;
+      deed = awardNeedActionDeed(state, body.id, need, 'pray');
+      awarded = !!deed;
+      await putDobro(env.KV, state);
+    }
+    return json({
+      ok: true,
+      awarded,
+      already: !awarded,
+      points: awarded ? DOBRO_NEED_ACT_POINTS : 0,
+      prayCount: need.prayCount || 0,
+      deed: deed ? { id: deed.id, title: deed.title, points: deed.points, createdAt: deed.createdAt } : null
+    }, 200, origin);
+  }
+
+  if (request.method === 'POST' && path === '/dobro/need/help') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const hit = findDobroNeed(state, body.needId);
+    if (!hit) return json({ ok: false, error: 'need', errorText: 'Нужда не найдена' }, 404, origin);
+    const need = hit.need;
+    if ((need.status || 'open') !== 'open') {
+      return json({ ok: false, error: 'closed', errorText: 'Нужда уже закрыта' }, 400, origin);
+    }
+    if (need.authorId === body.id) {
+      return json({ ok: false, error: 'self', errorText: 'Нельзя за свою нужду' }, 400, origin);
+    }
+    const helper = state.users[body.id];
+    if (!helper) return json({ ok: false, error: 'auth', errorText: 'Аккаунт не найден' }, 404, origin);
+    if (!need.helped || typeof need.helped !== 'object') need.helped = {};
+    if (!Array.isArray(need.offers)) need.offers = [];
+    let awarded = false;
+    let deed = null;
+    let dirty = false;
+    if (!need.helped[body.id]) {
+      need.helped[body.id] = 1;
+      need.helpCount = Object.keys(need.helped).length;
+      deed = awardNeedActionDeed(state, body.id, need, 'help');
+      awarded = !!deed;
+      dirty = true;
+    }
+    const hasContact = !!(need.contact && String(need.contact).trim());
+    if (!hasContact) {
+      const exists = need.offers.some((o) => o && o.id === body.id);
+      if (!exists) {
+        need.offers.unshift({
+          id: body.id,
+          name: helper.name || 'Участник',
+          createdAt: new Date().toISOString()
+        });
+        if (need.offers.length > 20) need.offers = need.offers.slice(0, 20);
+        dirty = true;
+      }
+    }
+    if (dirty) await putDobro(env.KV, state);
+    return json({
+      ok: true,
+      awarded,
+      already: !awarded,
+      points: awarded ? DOBRO_NEED_ACT_POINTS : 0,
+      helpCount: need.helpCount || 0,
+      hasContact,
+      contact: hasContact ? need.contact : '',
+      offered: !hasContact,
+      deed: deed ? { id: deed.id, title: deed.title, points: deed.points, createdAt: deed.createdAt } : null
+    }, 200, origin);
+  }
+
+  if (request.method === 'POST' && path === '/dobro/need/resolve') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const hit = findDobroNeed(state, body.needId);
+    if (!hit) return json({ ok: false, error: 'need', errorText: 'Нужда не найдена' }, 404, origin);
+    if (hit.need.authorId !== body.id) {
+      return json({ ok: false, error: 'auth', errorText: 'Только автор' }, 403, origin);
+    }
+    if ((hit.need.status || 'open') === 'open') {
+      hit.need.status = 'resolved';
+      hit.need.resolvedAt = new Date().toISOString();
+      await putDobro(env.KV, state);
+    }
+    return json({ ok: true, need: publicNeedItem(hit.need, body.id, null) }, 200, origin);
+  }
+
+  if (request.method === 'POST' && path === '/dobro/need/delete') {
+    const body = await request.json().catch(() => null);
+    if (!body || !validId(body.id)) return json({ ok: false, error: 'id' }, 400, origin);
+    const state = await getDobro(env.KV);
+    const hit = findDobroNeed(state, body.needId);
+    if (!hit) return json({ ok: false, error: 'need', errorText: 'Нужда не найдена' }, 404, origin);
+    if (hit.need.authorId !== body.id) {
+      return json({ ok: false, error: 'auth', errorText: 'Только автор' }, 403, origin);
+    }
+    const removed = hit.needs.splice(hit.idx, 1)[0];
+    if (removed && removed.hasPhoto) await deleteDobroPhotoBlob(env.KV, removed.id);
+    await putDobro(env.KV, state);
+    return json({ ok: true }, 200, origin);
   }
 
   if (request.method === 'POST' && path === '/dobro/push/subscribe') {

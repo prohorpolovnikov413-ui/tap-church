@@ -89,6 +89,10 @@
 
     <main class="app-main" id="app-main">
       <section id="panel-add" class="panel" data-title="Новое дело" hidden>
+        <div class="add-mode" id="add-mode" role="tablist" aria-label="Тип записи">
+          <button type="button" class="add-mode-btn on" data-mode="deed" id="mode-deed">Дело</button>
+          <button type="button" class="add-mode-btn" data-mode="need" id="mode-need">Нужда</button>
+        </div>
         <form id="deed-form">
           <label class="block-label">
             <span>Что сделали</span>
@@ -112,6 +116,30 @@
             <p class="muted quiet" id="me-line"></p>
           </div>
         </form>
+        <form id="need-form" class="hidden">
+          <label class="block-label">
+            <span>Нужда</span>
+            <textarea id="need-text" maxlength="160" required placeholder="Чем помочь…"></textarea>
+          </label>
+          <label class="block-label">
+            <span>Связь <span class="muted">(необяз.)</span></span>
+            <input type="text" id="need-contact" maxlength="120" placeholder="@ник · t.me/… · телефон">
+          </label>
+          <div>
+            <p class="lbl">Фото <span class="muted">необяз.</span></p>
+            <div class="photo-actions">
+              <button type="button" class="btn btn-cam" id="btn-need-camera">Камера</button>
+              <button type="button" class="btn btn-ghost" id="btn-need-gallery">Галерея</button>
+              <button type="button" class="linkish hidden" id="btn-need-del-photo">Убрать</button>
+            </div>
+            <input id="need-cam" class="file" type="file" accept="image/*" capture="environment">
+            <input id="need-gal" class="file" type="file" accept="image/jpeg,image/png,image/webp">
+            <img id="need-preview" class="preview hidden" alt="Превью">
+          </div>
+          <div class="row-actions">
+            <button class="btn" id="btn-need-add" type="submit">Опубликовать</button>
+          </div>
+        </form>
       </section>
 
       <section id="panel-feed" class="panel active" data-title="Лента">
@@ -122,6 +150,7 @@
         </div>
         <div class="feed-filters" id="feed-filters" role="tablist" aria-label="Фильтр ленты">
           <button type="button" class="feed-filter on" data-filter="all">Все</button>
+          <button type="button" class="feed-filter" data-filter="needs">Нужды</button>
           <button type="button" class="feed-filter" data-filter="friends">Друзья</button>
           <button type="button" class="feed-filter" data-filter="mine">Мои</button>
           <button type="button" class="feed-filter" data-filter="today">День</button>
