@@ -297,11 +297,6 @@
     layer.appendChild(el);
     setTimeout(() => el.remove(), 1000);
   }
-  function maybeOpenCamera() {
-    if (!rulesSeen()) return;
-    if (photo) return;
-    try { $('cam').click(); } catch {}
-  }
   function renderDaily() {
     const idea = dailyIdea();
     const title = $('daily-title');
@@ -310,8 +305,9 @@
     if (btn) {
       btn.onclick = () => {
         $('title').value = idea;
+        setAddMode('deed');
         setTab('add');
-        setTimeout(maybeOpenCamera, 280);
+        // Camera only via explicit «Камера» / «Галерея» buttons
       };
     }
   }
@@ -560,7 +556,6 @@
   function closeRules() {
     markRulesSeen();
     setTab(prevTab === 'rules' ? 'add' : prevTab || 'add');
-    setTimeout(maybeOpenCamera, 240);
   }
 
   function updatePinUi() {
@@ -1387,12 +1382,11 @@
     });
   }
 
-  // Big FAB: open add tab and launch camera (only after rules already seen)
+  // Big FAB: open add screen (Дело/Нужда). Camera only via photo buttons.
   const tabAdd = $('tab-add');
   if (tabAdd) {
     tabAdd.addEventListener('click', () => {
       setAddMode('deed');
-      setTimeout(maybeOpenCamera, 220);
     });
   }
 
@@ -1572,7 +1566,16 @@
   if (btnRulesDone) btnRulesDone.addEventListener('click', closeRules);
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
+    });
+    navigator.serviceWorker
+      .register('./sw.js?v=19', { scope: './', updateViaCache: 'none' })
+      .then((reg) => { try { reg.update(); } catch {} })
+      .catch(() => {});
   }
 
   const pushToggle = $('push-enabled');
