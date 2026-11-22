@@ -297,11 +297,6 @@
     layer.appendChild(el);
     setTimeout(() => el.remove(), 1000);
   }
-  function maybeOpenCamera() {
-    if (!rulesSeen()) return;
-    if (photo) return;
-    try { $('cam').click(); } catch {}
-  }
   function renderDaily() {
     const idea = dailyIdea();
     const title = $('daily-title');
