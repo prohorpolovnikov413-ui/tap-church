@@ -216,7 +216,7 @@ h3 {
 
 .lead {
   margin-top: 22px;
-  max-width: 16em;
+  max-width: 16.5em;
   font-size: clamp(1.22rem, 2.1vw, 1.62rem);
   line-height: 1.32;
   letter-spacing: -0.02em;
@@ -274,12 +274,12 @@ h3 {
   margin-top: 10px;
 }
 
-#cases .kicker { color: var(--peach); }
+#case .kicker { color: var(--peach); }
 #process .kicker { color: var(--mint); }
 #contacts .kicker { color: var(--pink); }
 
 .services,
-.cases,
+.pair,
 .steps {
   display: grid;
   gap: 14px;
@@ -299,10 +299,56 @@ h3 {
 }
 
 .service {
-  padding: 22px 22px 24px;
+  padding: 26px 24px 28px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
+}
+
+.include ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.include li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.include li::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-top: 0.48em;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.case-lead {
+  max-width: 38rem;
+}
+
+.case-link {
+  margin-top: 18px;
+  padding-top: 0;
+}
+
+.pair {
+  margin-top: 28px;
+}
+
+.placeholder-note {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .service:nth-child(4n + 2),
@@ -493,14 +539,6 @@ h3 {
 }
 
 @media (min-width: 720px) {
-  .services {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .service:last-child {
-    grid-column: 1 / -1;
-  }
-
   .steps {
     grid-template-columns: 1fr 1fr;
     gap: 28px 22px;
@@ -508,7 +546,8 @@ h3 {
 }
 
 @media (min-width: 800px) {
-  .cases {
+  .services,
+  .pair {
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
@@ -549,23 +588,6 @@ h3 {
 @media (min-width: 1040px) {
   .wrap {
     width: min(1120px, calc(100% - 96px));
-  }
-
-  .services {
-    grid-template-columns: repeat(6, 1fr);
-    gap: 16px;
-  }
-
-  .service,
-  .service:last-child {
-    grid-column: span 2;
-  }
-
-  .service:nth-child(1),
-  .service:nth-child(2),
-  .service:nth-child(6),
-  .service:nth-child(7) {
-    grid-column: span 3;
   }
 
   .steps {
